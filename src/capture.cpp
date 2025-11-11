@@ -65,6 +65,68 @@ Capture::Capture(const std::string& device, capture_config& conf,
     CLEAR(m_v4l2_buf);
 }
 
+bool Capture::checkDeviceCapabilities()
+{
+    Logger& log = m_logger;
+    struct v4l2_capability caps;
+    CLEAR(caps);
+
+    // Query Caps
+    log.info("Querying device capabilities.");
+    if(!xioctl(m_fd, VIDIOC_QUERYCAP, &caps)){
+        log.error("Error getting caps");
+        return false;
+    }
+
+    // Print device info
+    log.info("Device Name: %s", caps.card);
+    log.info("Driver Name: %s", caps.driver);
+    log.info("Device Bus: %s", (const char*)caps.bus_info);
+    log.info("Device Version: %u", (unsigned int)caps.version);
+    log.info("Device Caps:");
+    if(log.get_verbose())
+        print_v4l2_device_caps(caps.capabilities);
+
+    // Check device type
+    log.info("Checking device type.");
+    if(!(caps.capabilities & V4L2_CAP_STREAMING)){
+        log.error("Device %s does not support streaming."
+                "Please check the specified device !", caps.card);
+        return false;
+    }
+    if(caps.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE){
+        log.info("Device is a multi-planar video capture device");
+        m_is_mp_device = true;
+    }
+
+    return true;
+}
+
+bool Capture::start()
+{
+    Logger& log = m_logger;
+
+    // Check Caps
+    if(!checkDeviceCapabilities()){
+        log.error("checkDeviceCapabilities Failed !");
+        return false;
+    }
+
+    return true;
+}
+
+bool Capture::saveToFile(const std::string& path)
+{
+    (void) path;
+    
+    return true;
+}
+
+bool Capture::stop()
+{
+    return true;
+}
+
 Capture::~Capture()
 {
     Logger& log = m_logger;

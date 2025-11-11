@@ -23,6 +23,9 @@
 #pragma once
 
 #include <cstring>
-#include <stdexcept>
+#include <linux/videodev2.h>
 
 #define CLEAR(x) memset(&(x), 0, sizeof(x))
+
+bool xioctl(int fd, unsigned long req, void *arg);
+void print_v4l2_device_caps(__u32 caps);

@@ -56,6 +56,10 @@ private:
     bool m_plane_count;
     Logger m_logger;
 
+    bool checkDeviceCapabilities();
+    bool checkDeviceFormats();
+    bool setFormat();
+
     bool requestBuffers();
     bool mapBuffers();
     bool queueBuffers();
@@ -66,9 +70,6 @@ public:
         bool verbose);
     ~Capture();
 
-    bool checkCapabilities();
-    bool checkFormat();
-    bool setFormat();
     bool start();
     bool saveToFile(const std::string& path);
     bool stop();

@@ -42,7 +42,28 @@ int main(int argc, char* argv[]){
     conf.mem_type = TYPE_MMAP;
     conf.buf_count = 5;
 
-    Capture cap(ISP_MAINPATH, conf, true);
+    printf("[MAIN] Starting Capture...\n");
+
+    Capture capture(ISP_MAINPATH, conf, true);
+    
+    if(!capture.start()){
+        printf("start Faild !\n");
+        return -1;
+    }
+
+    printf("[MAIN] Saving one Frame...\n");
+
+    if(!capture.saveToFile("frame.yuv")){
+        printf("saveToFile Faild !\n");
+        return -1;
+    }
+
+    printf("[MAIN] Stoping Capture...\n");
+
+    if(!capture.stop()){
+        printf("stop Faild !\n");
+        return -1;
+    }
 
     return 0;
 }

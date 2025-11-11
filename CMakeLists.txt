@@ -37,6 +37,7 @@ endif()
 set(sources
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/capture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/logger.cpp
 )
 
