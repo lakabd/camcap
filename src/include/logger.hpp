@@ -22,7 +22,22 @@
 
 #pragma once
 
-#include <cstring>
-#include <stdexcept>
+#include <string>
 
-#define CLEAR(x) memset(&(x), 0, sizeof(x))
+class Logger {
+private:
+    std::string m_name;
+    bool m_verbose;
+
+public:
+    Logger(const std::string& name = "", bool verbose = false);
+    ~Logger();
+
+    void set_verbose(bool verbose);
+    bool get_verbose();
+
+    void info(const char* fmt, ...) const;
+    void error(const char* fmt, ...) const;
+    void warning(const char* fmt, ...) const;
+    [[noreturn]] void fatal(const std::string& msg) const;
+};

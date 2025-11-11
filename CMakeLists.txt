@@ -37,12 +37,14 @@ endif()
 set(sources
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/capture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/logger.cpp
 )
 
 # Header files
 set(headers
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/helpers.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/capture.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/include/logger.hpp    
 )
 
 # Create executable

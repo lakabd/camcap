@@ -24,6 +24,7 @@
 
 #include <vector>
 #include <linux/videodev2.h>
+#include "logger.hpp"
 
 struct capture_buf {
     void* start[VIDEO_MAX_PLANES];
@@ -53,7 +54,7 @@ private:
     capture_config& m_config;
     bool m_is_mp_device;
     bool m_plane_count;
-    bool m_verbose;
+    Logger m_logger;
 
     bool requestBuffers();
     bool mapBuffers();

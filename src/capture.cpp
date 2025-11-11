@@ -35,37 +35,39 @@
 
 Capture::Capture(const std::string& device, capture_config& conf, 
     bool verbose)
-    : m_config(conf), m_is_mp_device(false), m_verbose(verbose)
+    : m_config(conf), m_is_mp_device(false), m_logger("capture", verbose)
 {
+    Logger& log = m_logger;
     // Check device
     struct stat st;
     if(stat(device.c_str(), &st) < 0){
-        throw_error("Failed to stat device " + device + ": " + 
-            std::strerror(errno));
+        log.fatal("Failed to stat device " + device + ": " + strerror(errno));
     }
     if(!S_ISCHR(st.st_mode)){
-        throw_error(device + " is not a character device");
+        log.fatal(device + " is not a character device");
     }
+    log.info("Opening device %s", device.c_str());
     m_fd = open(device.c_str(), O_RDWR);
     if(m_fd < 0)
-        throw_error("Failed to open device " + device + ": " + 
-            std::strerror(errno));
+        log.fatal("Failed to open device " + device + ": " + strerror(errno));
     
     // Check config
     if(conf.fmt == 0 || conf.width == 0 || conf.height == 0 || 
             conf.mem_type >= MEM_TYPE_MAX || conf.buf_count == 0)
-        throw_error("Capture config not correctly defined. Please check!");
+        log.fatal("Capture config not correctly defined. Please check!");
 
     // Init members
     try{
         m_capture_buf.resize(conf.buf_count);
     } catch(const std::bad_alloc& e){
-        throw_error("Failed to allocate capture buffers");
+        log.fatal("Failed to allocate capture buffers");
     }
     CLEAR(m_v4l2_buf);
 }
 
 Capture::~Capture()
 {
+    Logger& log = m_logger;
+    log.info("Quitting...");
     close(m_fd);
 }
