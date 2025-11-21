@@ -37,6 +37,7 @@ public:
     bool get_verbose();
 
     void info(const char* fmt, ...) const;
+    void status(const char* fmt, ...) const;
     void error(const char* fmt, ...) const;
     void warning(const char* fmt, ...) const;
     [[noreturn]] void fatal(const std::string& msg) const;

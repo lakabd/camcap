@@ -46,7 +46,8 @@ Capture::Capture(const std::string& device, capture_config& conf,
     if(!S_ISCHR(st.st_mode)){
         log.fatal(device + " is not a character device");
     }
-    log.info("Opening device %s", device.c_str());
+    
+    log.status("Opening device %s", device.c_str());
     m_fd = open(device.c_str(), O_RDWR);
     if(m_fd < 0)
         log.fatal("Failed to open device " + device + ": " + strerror(errno));
@@ -72,7 +73,7 @@ bool Capture::checkDeviceCapabilities()
     CLEAR(caps);
 
     // Query Caps
-    log.info("Querying device capabilities.");
+    log.status("Querying device capabilities.");
     if(!xioctl(m_fd, VIDIOC_QUERYCAP, &caps)){
         log.error("Error getting caps");
         return false;
@@ -88,7 +89,7 @@ bool Capture::checkDeviceCapabilities()
         print_v4l2_device_caps(caps.capabilities);
 
     // Check device type
-    log.info("Checking device type.");
+    log.status("Checking device type.");
     if(!(caps.capabilities & V4L2_CAP_STREAMING)){
         log.error("Device %s does not support streaming."
                 "Please check the specified device !", caps.card);
@@ -112,6 +113,8 @@ bool Capture::start()
         return false;
     }
 
+    log.status("Capture is ON !");
+
     return true;
 }
 
@@ -124,12 +127,16 @@ bool Capture::saveToFile(const std::string& path)
 
 bool Capture::stop()
 {
+    Logger& log = m_logger;
+
+    log.status("Capture is OFF !");
+
     return true;
 }
 
 Capture::~Capture()
 {
     Logger& log = m_logger;
-    log.info("Quitting...");
+    log.status("Quitting...");
     close(m_fd);
 }

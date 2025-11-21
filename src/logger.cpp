@@ -59,6 +59,19 @@ void Logger::info(const char* fmt, ...) const
     va_end(args);
 }
 
+// Showing status even when verbose is false
+void Logger::status(const char* fmt, ...) const
+{
+    va_list args;
+    va_start(args, fmt);
+
+    printf("[%s] Status: ", m_name.c_str());
+    vprintf(fmt, args);
+    printf("\n");
+
+    va_end(args);
+}
+
 void Logger::error(const char* fmt, ...) const
 {
     va_list args;
