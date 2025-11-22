@@ -38,7 +38,7 @@ typedef enum {
 } mem_type_t;
 
 struct capture_config {
-    __u32 fmt;
+    std::string fmt_fourcc;
     __u32 width;
     __u32 height;
 
@@ -56,20 +56,26 @@ private:
     bool m_plane_count;
     Logger m_logger;
 
+    // Caps
     bool checkDeviceCapabilities();
-    bool checkDeviceFormats();
+
+    // Formats
+    bool enumerateFormats(std::vector<std::string>& list);
+    bool checkFormat();
+    bool checkFormatSize();
     bool setFormat();
 
+    // Buffers
     bool requestBuffers();
     bool mapBuffers();
     bool queueBuffers();
     bool dequeueBuffers();
 
 public:
-    Capture(const std::string& device, capture_config& conf, 
-        bool verbose);
+    Capture(const std::string& device, capture_config& conf, bool verbose);
     ~Capture();
 
+    // Interface
     bool start();
     bool saveToFile(const std::string& path);
     bool stop();

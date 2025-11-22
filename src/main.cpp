@@ -34,9 +34,7 @@ int main(int argc, char* argv[]){
 
     // Init capture
     capture_config conf;
-    CLEAR(conf);
-
-    conf.fmt = V4L2_PIX_FMT_NV12;
+    conf.fmt_fourcc = "NV12";
     conf.width = 1920;
     conf.height = 1080;
     conf.mem_type = TYPE_MMAP;
