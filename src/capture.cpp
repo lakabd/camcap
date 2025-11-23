@@ -467,6 +467,25 @@ bool Capture::queueBuffers()
     return true;
 }
 
+bool Capture::streamOn()
+{
+    Logger& log = m_logger;
+
+    // Start streaming
+    enum v4l2_buf_type type = m_is_mp_device ? 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    
+    if(!xioctl(m_fd, VIDIOC_STREAMON, &type)){
+        log.error("VIDIOC_STREAMON failed");
+        return false;
+    }
+    
+    log.info("Streaming started successfully");
+
+    return true;
+}
+
 bool Capture::start()
 {
     Logger& log = m_logger;
@@ -507,6 +526,12 @@ bool Capture::start()
         return false;
     }
 
+    // Start streaming
+    if(!streamOn()){
+        log.error("Capture::streamOn Failed !");
+        return false;
+    }
+
     log.status("Capture is ON !");
 
     return true;
@@ -519,9 +544,34 @@ bool Capture::saveToFile(const std::string& path)
     return true;
 }
 
+bool Capture::streamOff()
+{
+    Logger& log = m_logger;
+
+    // Stop streaming
+    enum v4l2_buf_type type = m_is_mp_device ? 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    
+    if(!xioctl(m_fd, VIDIOC_STREAMOFF, &type)){
+        log.error("VIDIOC_STREAMOFF failed");
+        return false;
+    }
+    
+    log.info("Streaming stopped successfully");
+
+    return true;
+}
+
 bool Capture::stop()
 {
     Logger& log = m_logger;
+
+    // Stop streaming
+    if(!streamOff()){
+        log.error("Capture::streamOff Failed !");
+        return false;
+    }
 
     log.status("Capture is OFF !");
 

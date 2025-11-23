@@ -56,7 +56,7 @@ int main(int argc, char* argv[]){
         return -1;
     }
 
-    printf("[MAIN] Stoping Capture...\n");
+    printf("[MAIN] Stopping Capture...\n");
 
     if(!capture.stop()){
         printf("stop Faild !\n");

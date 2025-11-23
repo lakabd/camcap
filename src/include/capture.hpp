@@ -70,6 +70,10 @@ private:
     bool queueBuffers();
     bool dequeueBuffers();
 
+    // Streaming
+    bool streamOn();
+    bool streamOff();
+
 public:
     Capture(const std::string& device, capture_config& conf, bool verbose);
     ~Capture();
