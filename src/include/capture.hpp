@@ -27,8 +27,8 @@
 #include "logger.hpp"
 
 struct capture_buf {
-    void* start[VIDEO_MAX_PLANES];
-    size_t length[VIDEO_MAX_PLANES];
+    void* plane_addr[VIDEO_MAX_PLANES];
+    size_t plane_size[VIDEO_MAX_PLANES];
 };
 
 typedef enum {
@@ -53,7 +53,6 @@ private:
     struct v4l2_buffer m_v4l2_buf{};
     capture_config& m_config;
     bool m_is_mp_device{false};
-    bool m_plane_count{false};
     Logger m_logger;
 
     // Caps

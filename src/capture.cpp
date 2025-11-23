@@ -292,7 +292,7 @@ bool Capture::setFormat()
         format.fmt.pix_mp.width = m_config.width;
         format.fmt.pix_mp.height = m_config.height;
     } else {
-        log.error("Capture class doesn't support Non-Planar devices yet");
+        log.error("TODO: Capture class doesn't support Non-Planar devices");
         return false;
     }
 
@@ -362,6 +362,77 @@ bool Capture::requestBuffers()
     return true;
 }
 
+bool Capture::mapBuffers()
+{
+    Logger& log = m_logger;
+    struct v4l2_buffer buf{};
+    struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
+    
+    log.status("Mapping capture buffers: Using %s", (m_config.mem_type == 
+            TYPE_DMABUF) ? "DMABUF" : "MMAP" );
+    
+    // Fill v4l2_buffer struct
+    buf.type = m_is_mp_device ? 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? 
+        V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    if(m_is_mp_device){
+        buf.m.planes = planes;
+        buf.length   = VIDEO_MAX_PLANES;
+    }
+
+    // Query and map each requested buffer
+    for(unsigned int i = 0; i < m_config.buf_count; i++){
+        buf.index  = i;
+        
+        // Query buffer to get plane information
+        if(!xioctl(m_fd, VIDIOC_QUERYBUF, &buf)){
+            log.error("VIDIOC_QUERYBUF failed for buffer %d", i);
+            return false;
+        }
+        
+        // Map buffer planes
+        if(m_is_mp_device){
+            log.info(". Buffer %d: (%d plane(s))", i, buf.length);
+            
+            for(unsigned int p = 0; p < buf.length; p++){
+                void* mapped = mmap(NULL, planes[p].length,
+                    PROT_READ | PROT_WRITE, MAP_SHARED,
+                    m_fd, planes[p].m.mem_offset);
+                
+                if(mapped == MAP_FAILED){
+                    log.error("mmap failed for buffer %d plane %d: %s",
+                        i, p, strerror(errno));
+                    // Unmap previously mapped buffers
+                    for(unsigned int j = 0; j <= i; j++){
+                        for(unsigned int k = 0; k < buf.length; k++){
+                            if(m_capture_buf[j].plane_addr[k] != nullptr){
+                                munmap(m_capture_buf[j].plane_addr[k], 
+                                    m_capture_buf[j].plane_size[k]);
+                            }
+                        }
+                    }
+                    return false;
+                }
+                // Save addr and size
+                m_capture_buf[i].plane_addr[p] = mapped;
+                m_capture_buf[i].plane_size[p] = planes[p].length;
+                
+                log.info("    Plane %d: addr=%p, size=%u bytes, offset=%u",
+                    p, mapped, planes[p].length, planes[p].m.mem_offset);
+            }
+        } else {
+            log.error("TODO: Capture class doesn't support Non-Planar devices");
+            return false;
+        }
+    }
+    
+    log.info("Successfully mapped %d buffers", m_config.buf_count);
+
+    return true;
+}
+
 bool Capture::start()
 {
     Logger& log = m_logger;
@@ -387,6 +458,12 @@ bool Capture::start()
     // Request capture buffers
     if(!requestBuffers()){
         log.error("Capture::requestBuffers Failed !");
+        return false;
+    }
+
+    // Map capture buffers
+    if(!mapBuffers()){
+        log.error("Capture::mapBuffers Failed !");
         return false;
     }
 
