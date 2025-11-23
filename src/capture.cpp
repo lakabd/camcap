@@ -33,9 +33,8 @@
 #include "helpers.hpp"
 #include "capture.hpp"
 
-Capture::Capture(const std::string& device, capture_config& conf, 
-    bool verbose)
-    : m_config(conf), m_is_mp_device(false), m_logger("capture", verbose)
+Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
+    : m_config(conf), m_logger("capture", verbose)
 {
     Logger& log = m_logger;
     // Check device
@@ -67,14 +66,12 @@ Capture::Capture(const std::string& device, capture_config& conf,
     } catch(const std::bad_alloc& e){
         log.fatal("Failed to allocate capture buffers");
     }
-    CLEAR(m_v4l2_buf);
 }
 
 bool Capture::checkDeviceCapabilities()
 {
     Logger& log = m_logger;
-    struct v4l2_capability caps;
-    CLEAR(caps);
+    struct v4l2_capability caps{};
 
     // Query Caps
     log.status("Querying device capabilities.");
@@ -110,8 +107,7 @@ bool Capture::checkDeviceCapabilities()
 bool Capture::enumerateFormats(std::vector<std::string>& list)
 {
     Logger& log = m_logger;
-    struct v4l2_fmtdesc fmtdesc;
-    CLEAR(fmtdesc);
+    struct v4l2_fmtdesc fmtdesc{};
     
     // Set buffer type based on whether device is multi-planar
     fmtdesc.type = m_is_mp_device ? 
@@ -159,8 +155,7 @@ bool Capture::checkFormatSize()
     std::string& fourcc = m_config.fmt_fourcc;
     unsigned int w = m_config.width;
     unsigned int h = m_config.height;
-    struct v4l2_frmsizeenum frmsize;
-    CLEAR(frmsize);
+    struct v4l2_frmsizeenum frmsize{};
 
      __u32 v4l2_fmt = v4l2_fourcc(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
     frmsize.pixel_format = v4l2_fmt;
@@ -282,8 +277,7 @@ bool Capture::setFormat()
 {
     Logger& log = m_logger;
     std::string& fourcc = m_config.fmt_fourcc;
-    struct v4l2_format format;
-    CLEAR(format);
+    struct v4l2_format format{};
     
     log.status("Setting requested format");
 

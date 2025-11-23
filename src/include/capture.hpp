@@ -48,12 +48,12 @@ struct capture_config {
 
 class Capture {
 private:
-    int m_fd;
+    int m_fd{-1};
     std::vector<capture_buf> m_capture_buf;
-    struct v4l2_buffer m_v4l2_buf;
+    struct v4l2_buffer m_v4l2_buf{};
     capture_config& m_config;
-    bool m_is_mp_device;
-    bool m_plane_count;
+    bool m_is_mp_device{false};
+    bool m_plane_count{false};
     Logger m_logger;
 
     // Caps
