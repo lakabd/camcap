@@ -582,5 +582,18 @@ Capture::~Capture()
 {
     Logger& log = m_logger;
     log.status("Quitting...");
+
+    // Unmap requested buffers
+    for(unsigned int i = 0; i < m_config.buf_count; i++){
+        for(unsigned int p = 0; p < VIDEO_MAX_PLANES; p++){
+            if(m_capture_buf[i].plane_addr[p] != nullptr){
+                munmap(m_capture_buf[i].plane_addr[p], 
+                    m_capture_buf[i].plane_size[p]);
+                m_capture_buf[i].plane_addr[p] = nullptr;
+            }
+        }
+    }
+    
+    // Close device FD
     close(m_fd);
 }
