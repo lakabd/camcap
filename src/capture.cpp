@@ -325,6 +325,43 @@ bool Capture::setFormat()
     return true;
 }
 
+bool Capture::requestBuffers()
+{
+    Logger& log = m_logger;
+    struct v4l2_requestbuffers req{};
+
+    log.status("Requesting capture buffers");
+
+    // Request buffers
+    req.count  = m_config.buf_count;
+    req.type   = m_is_mp_device ? 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF :
+            V4L2_MEMORY_MMAP;
+    if(!xioctl(m_fd, VIDIOC_REQBUFS, &req)){
+        log.error("VIDIOC_REQBUFS failed, error requesting buffers");
+        return false;
+    }
+
+    // Verify
+    if(req.count != m_config.buf_count){
+        log.warning("Driver adjusted buffer count from %d to %d",
+            m_config.buf_count, req.count);
+        m_config.buf_count = req.count;
+        try{
+            m_capture_buf.resize(req.count);
+        } catch(const std::bad_alloc& e) {
+            log.error("Failed to resize capture buffer vector");
+            return false;
+        }
+    }
+    
+    log.info("Allocated %d buffers", req.count);
+    
+    return true;
+}
+
 bool Capture::start()
 {
     Logger& log = m_logger;
@@ -344,6 +381,12 @@ bool Capture::start()
     // Set format
     if(!setFormat()){
         log.error("Capture::setFormat Failed !");
+        return false;
+    }
+
+    // Request capture buffers
+    if(!requestBuffers()){
+        log.error("Capture::requestBuffers Failed !");
         return false;
     }
 
