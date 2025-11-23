@@ -433,6 +433,40 @@ bool Capture::mapBuffers()
     return true;
 }
 
+bool Capture::queueBuffers()
+{
+    Logger& log = m_logger;
+    struct v4l2_buffer buf{};
+    struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
+    
+    log.status("Queuing capture buffers");
+    // Fill v4l2_buffer struct
+    buf.type = m_is_mp_device ? 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? 
+        V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    
+    if(m_is_mp_device){
+        buf.m.planes = planes;
+        buf.length   = VIDEO_MAX_PLANES;
+    }
+    
+    // Queue each buffer
+    for(unsigned int i = 0; i < m_config.buf_count; i++){
+        buf.index = i;
+        
+        if(!xioctl(m_fd, VIDIOC_QBUF, &buf)){
+            log.error("VIDIOC_QBUF failed for buffer %d", i);
+            return false;
+        }
+        
+        log.info(". Buffer %d queued", i);
+    }
+    
+    return true;
+}
+
 bool Capture::start()
 {
     Logger& log = m_logger;
@@ -464,6 +498,12 @@ bool Capture::start()
     // Map capture buffers
     if(!mapBuffers()){
         log.error("Capture::mapBuffers Failed !");
+        return false;
+    }
+
+    // Queue capture buffers
+    if(!queueBuffers()){
+        log.error("Capture::queueBuffers Failed !");
         return false;
     }
 
