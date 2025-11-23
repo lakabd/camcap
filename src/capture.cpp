@@ -537,9 +537,79 @@ bool Capture::start()
     return true;
 }
 
-bool Capture::saveToFile(const std::string& path)
+bool Capture::saveOneFrame(const std::string& path)
 {
-    (void) path;
+    Logger& log = m_logger;
+    struct v4l2_buffer buf{};
+    struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
+    
+    log.status("Capturing one frame to %s", path.c_str());
+
+    // Path sanity check
+    if(path.empty()){
+        log.error("Output path is empty");
+        return false;
+    }
+
+    // Prepare v4l2_buffer struct
+    buf.type = m_is_mp_device ? 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
+        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? 
+        V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    
+    if(m_is_mp_device){
+        buf.m.planes = planes;
+        buf.length   = VIDEO_MAX_PLANES;
+    }
+    
+    // Dequeue buffer
+    if(!xioctl(m_fd, VIDIOC_DQBUF, &buf)){ // this will block when no buffer 
+                                           // is in the driver's outgoing queue.
+        log.error("VIDIOC_DQBUF failed");
+        return false;
+    }
+    
+    log.info("Dequeued buffer %d", buf.index);
+    
+    // Open output file
+    std::ofstream outfile(path, std::ios::binary);
+    if(!outfile.is_open()){
+        log.error("Failed to open output file: %s", path.c_str());
+        // Important: re-queue buffer before returning
+        xioctl(m_fd, VIDIOC_QBUF, &buf);
+        return false;
+    }
+    
+    // Write frame data
+    if(m_is_mp_device){
+        for(unsigned int p = 0; p < buf.length; p++){
+            if(planes[p].bytesused > 0){
+                outfile.write(static_cast<const char*>
+                    (m_capture_buf[buf.index].plane_addr[p]), 
+                    planes[p].bytesused);
+                // Check if write okay
+                if(outfile.fail()){
+                    log.error("Failed to write plane %d to file: %s", 
+                        p, strerror(errno));
+                    outfile.close();
+                    // Re-queue buffer before returning
+                    xioctl(m_fd, VIDIOC_QBUF, &buf);
+                    return false;
+                }
+                log.info("Wrote plane %d: %u bytes", p, planes[p].bytesused);
+            }
+        }
+    }
+    
+    outfile.close();
+    log.info("Frame saved to %s", path.c_str());
+    
+    // Re-queue buffer
+    if(!xioctl(m_fd, VIDIOC_QBUF, &buf)){
+        log.error("VIDIOC_QBUF failed while re-queuing buffer %d", buf.index);
+        return false;
+    }
     
     return true;
 }

@@ -80,6 +80,6 @@ public:
 
     // Interface
     bool start();
-    bool saveToFile(const std::string& path);
+    bool saveOneFrame(const std::string& path);
     bool stop();
 };

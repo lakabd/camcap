@@ -51,8 +51,8 @@ int main(int argc, char* argv[]){
 
     printf("[MAIN] Saving one Frame...\n");
 
-    if(!capture.saveToFile("frame.yuv")){
-        printf("saveToFile Faild !\n");
+    if(!capture.saveOneFrame("frame.yuv")){
+        printf("saveOneFrame Faild !\n");
         return -1;
     }
 
