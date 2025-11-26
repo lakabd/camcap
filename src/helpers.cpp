@@ -36,8 +36,7 @@ bool xioctl(int fd, unsigned long req, void *arg)
         if (errno == EINTR) {
             continue;  // interrupted by signal, retry
         }
-        printf("ioctl error: request %#lx faild with error: %s\n", req, 
-            strerror(errno));
+        printf("ioctl error: request %#lx faild with error: %s\n", req, strerror(errno));
         return false;
     }
 }
@@ -104,7 +103,7 @@ void print_v4l2_device_caps(__u32 caps)
     if(caps & V4L2_CAP_IO_MC)
         caps_list.push_back("V4L2_CAP_IO_MC");
     
-    // Display found capabilities
+    // found capabilities
     for(const auto& cap_name : caps_list){
         printf("\t%s\n", cap_name);
     }

@@ -52,13 +52,11 @@ Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
         log.fatal("Failed to open device " + device + ": " + strerror(errno));
     
     // Check config
-    if(conf.width == 0 || conf.height == 0 || 
-            conf.mem_type >= MEM_TYPE_MAX || conf.buf_count == 0)
+    if(conf.width == 0 || conf.height == 0 || conf.mem_type >= MEM_TYPE_MAX || conf.buf_count == 0)
         log.fatal("Capture config not correctly defined. Please check!");
     
     if(conf.fmt_fourcc.length() != 4)
         log.fatal("Format must be a 4-character string (e.g., 'NV12')");
-
 
     // Init members
     try{
@@ -92,8 +90,7 @@ bool Capture::checkDeviceCapabilities()
     // Check device type
     log.status("Checking device type.");
     if(!(caps.capabilities & V4L2_CAP_STREAMING)){
-        log.error("Device %s does not support streaming."
-                "Please check the specified device !", caps.card);
+        log.error("Device %s does not support streaming. Please check the specified device !", caps.card);
         return false;
     }
     if(caps.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE){
@@ -129,9 +126,7 @@ bool Capture::enumerateFormats(std::vector<std::string>& list)
         fourcc[3] = (fmtdesc.pixelformat >> 24) & 0xFF;
         list.push_back(fourcc);
         
-        log.info(". %d: %s - %s %s", fmtdesc.index, 
-            list.back().c_str(), fmtdesc.description,
-            (fmtdesc.flags & V4L2_FMT_FLAG_COMPRESSED) ? " [compressed]" : "");
+        log.info(". %d: %s - %s %s", fmtdesc.index, list.back().c_str(), fmtdesc.description, (fmtdesc.flags & V4L2_FMT_FLAG_COMPRESSED) ? " [compressed]" : "");
 
         fmtdesc.index++;
     }
@@ -178,42 +173,23 @@ bool Capture::checkFormatSize()
         }
         else if(frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE){
             // Stepwise frame sizes
-            log.info("  [%d] Stepwise (range with step):",
-                frmsize.index);
-            log.info("      Width:  %d - %d (step %d)",
-                frmsize.stepwise.min_width,
-                frmsize.stepwise.max_width,
-                frmsize.stepwise.step_width);
-            log.info("      Height: %d - %d (step %d)",
-                frmsize.stepwise.min_height,
-                frmsize.stepwise.max_height,
-                frmsize.stepwise.step_height);
+            log.info("  [%d] Stepwise (range with step):", frmsize.index);
+            log.info("      Width:  %d - %d (step %d)", frmsize.stepwise.min_width,  frmsize.stepwise.max_width,  frmsize.stepwise.step_width);
+            log.info("      Height: %d - %d (step %d)", frmsize.stepwise.min_height, frmsize.stepwise.max_height, frmsize.stepwise.step_height);
             // Size must fit within stepwise range and steps
-            bool width_ok = (w >= frmsize.stepwise.min_width &&
-                             w <= frmsize.stepwise.max_width &&
-                             w % frmsize.stepwise.step_width == 0);
-            bool height_ok = (h >= frmsize.stepwise.min_height &&
-                              h <= frmsize.stepwise.max_height &&
-                              h % frmsize.stepwise.step_height == 0);
+            bool width_ok =  (w >= frmsize.stepwise.min_width  && w <= frmsize.stepwise.max_width  && w % frmsize.stepwise.step_width  == 0);
+            bool height_ok = (h >= frmsize.stepwise.min_height && h <= frmsize.stepwise.max_height && h % frmsize.stepwise.step_height == 0);
             
             if(width_ok && height_ok)
                 requested_size_ok = true;
         }
         else if(frmsize.type == V4L2_FRMSIZE_TYPE_CONTINUOUS){
             // Continuous frame sizes
-            log.info("  [%d] Continuous (any size in range):",
-                frmsize.index);
-            log.info("      Width:  %d - %d",
-                frmsize.stepwise.min_width,
-                frmsize.stepwise.max_width);
-            log.info("      Height: %d - %d",
-                frmsize.stepwise.min_height,
-                frmsize.stepwise.max_height);
+            log.info("  [%d] Continuous (any size in range):", frmsize.index);
+            log.info("      Width:  %d - %d", frmsize.stepwise.min_width,  frmsize.stepwise.max_width);
+            log.info("      Height: %d - %d", frmsize.stepwise.min_height, frmsize.stepwise.max_height);
             // Size must fit within continuous range
-            if(w >= frmsize.stepwise.min_width &&
-                    w <= frmsize.stepwise.max_width &&
-                    h >= frmsize.stepwise.min_height &&
-                    h <= frmsize.stepwise.max_height)
+            if(w >= frmsize.stepwise.min_width && w <= frmsize.stepwise.max_width && h >= frmsize.stepwise.min_height && h <= frmsize.stepwise.max_height)
                 requested_size_ok = true;
         }
 
@@ -221,15 +197,13 @@ bool Capture::checkFormatSize()
     }
     // If no sizes are found, assume all sizes are supported
     if(!found_sizes){
-        log.warning("Warning VIDIOC_ENUM_FRAMESIZES: No frame sizes found for" 
-            "format %s", fourcc.c_str());
+        log.warning("Warning VIDIOC_ENUM_FRAMESIZES: No frame sizes found for format %s", fourcc.c_str());
         return true;
     }
 
     // Check if requested size was found
     if(!requested_size_ok){
-        log.error("Size %dx%d is NOT supported for format %s", w, h,
-            fourcc.c_str());
+        log.error("Size %dx%d is NOT supported for format %s", w, h, fourcc.c_str());
         return false;
     }
     
@@ -259,8 +233,7 @@ bool Capture::checkFormat()
         }
     }
     if(!format_found){
-        log.error("Requested format '%s' is not supported by device", 
-            fourcc.c_str());
+        log.error("Requested format '%s' is not supported by device", fourcc.c_str());
         return false;
     }
     
@@ -282,9 +255,7 @@ bool Capture::setFormat()
     log.status("Setting requested format");
 
     // Set requested format and size
-    format.type = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    format.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
     __u32 v4l2_fmt = v4l2_fourcc(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
 
     if(m_is_mp_device){
@@ -304,22 +275,16 @@ bool Capture::setFormat()
     // Verify
     if(m_is_mp_device){
         if(format.fmt.pix_mp.pixelformat != v4l2_fmt){
-            log.warning("Driver adjusted pixel format from %s to %c%c%c%c",
-                fourcc.c_str(),
-                format.fmt.pix_mp.pixelformat & 0xFF,
+            log.warning("Driver adjusted pixel format from %s to %c%c%c%c", fourcc.c_str(), format.fmt.pix_mp.pixelformat & 0xFF,
                 (format.fmt.pix_mp.pixelformat >> 8) & 0xFF,
                 (format.fmt.pix_mp.pixelformat >> 16) & 0xFF,
                 (format.fmt.pix_mp.pixelformat >> 24) & 0xFF);
         }
         if(format.fmt.pix_mp.width != m_config.width || 
            format.fmt.pix_mp.height != m_config.height){
-            log.warning("Driver adjusted resolution from %dx%d to %dx%d",
-                m_config.width, m_config.height,
-                format.fmt.pix_mp.width, format.fmt.pix_mp.height);
+            log.warning("Driver adjusted resolution from %dx%d to %dx%d", m_config.width, m_config.height, format.fmt.pix_mp.width, format.fmt.pix_mp.height);
         }
-        log.info("Format set: %dx%d, num_planes=%d",
-            format.fmt.pix_mp.width, format.fmt.pix_mp.height,
-            format.fmt.pix_mp.num_planes);
+        log.info("Format set: %dx%d, num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.num_planes);
     }
 
     return true;
@@ -334,11 +299,8 @@ bool Capture::requestBuffers()
 
     // Request buffers
     req.count  = m_config.buf_count;
-    req.type   = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF :
-            V4L2_MEMORY_MMAP;
+    req.type   = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     if(!xioctl(m_fd, VIDIOC_REQBUFS, &req)){
         log.error("VIDIOC_REQBUFS failed, error requesting buffers");
         return false;
@@ -346,9 +308,9 @@ bool Capture::requestBuffers()
 
     // Verify
     if(req.count != m_config.buf_count){
-        log.warning("Driver adjusted buffer count from %d to %d",
-            m_config.buf_count, req.count);
+        log.warning("Driver adjusted buffer count from %d to %d", m_config.buf_count, req.count); 
         m_config.buf_count = req.count;
+
         try{
             m_capture_buf.resize(req.count);
         } catch(const std::bad_alloc& e) {
@@ -368,15 +330,11 @@ bool Capture::mapBuffers()
     struct v4l2_buffer buf{};
     struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
     
-    log.status("Mapping capture buffers: Using %s", (m_config.mem_type == 
-            TYPE_DMABUF) ? "DMABUF" : "MMAP" );
+    log.status("Mapping capture buffers: Using %s", (m_config.mem_type == TYPE_DMABUF) ? "DMABUF" : "MMAP" );
     
     // Fill v4l2_buffer struct
-    buf.type = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? 
-        V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     if(m_is_mp_device){
         buf.m.planes = planes;
         buf.length   = VIDEO_MAX_PLANES;
@@ -397,19 +355,14 @@ bool Capture::mapBuffers()
             log.info(". Buffer %d: (%d plane(s))", i, buf.length);
             
             for(unsigned int p = 0; p < buf.length; p++){
-                void* mapped = mmap(NULL, planes[p].length,
-                    PROT_READ | PROT_WRITE, MAP_SHARED,
-                    m_fd, planes[p].m.mem_offset);
-                
+                void* mapped = mmap(NULL, planes[p].length, PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, planes[p].m.mem_offset);
                 if(mapped == MAP_FAILED){
-                    log.error("mmap failed for buffer %d plane %d: %s",
-                        i, p, strerror(errno));
+                    log.error("mmap failed for buffer %d plane %d: %s", i, p, strerror(errno));
                     // Unmap previously mapped buffers
                     for(unsigned int j = 0; j <= i; j++){
                         for(unsigned int k = 0; k < buf.length; k++){
                             if(m_capture_buf[j].plane_addr[k] != nullptr){
-                                munmap(m_capture_buf[j].plane_addr[k], 
-                                    m_capture_buf[j].plane_size[k]);
+                                munmap(m_capture_buf[j].plane_addr[k], m_capture_buf[j].plane_size[k]);
                             }
                         }
                     }
@@ -419,8 +372,7 @@ bool Capture::mapBuffers()
                 m_capture_buf[i].plane_addr[p] = mapped;
                 m_capture_buf[i].plane_size[p] = planes[p].length;
                 
-                log.info("    Plane %d: addr=%p, size=%u bytes, offset=%u",
-                    p, mapped, planes[p].length, planes[p].m.mem_offset);
+                log.info("    Plane %d: addr=%p, size=%u bytes, offset=%u", p, mapped, planes[p].length, planes[p].m.mem_offset);
             }
         } else {
             log.error("TODO: Capture class doesn't support Non-Planar devices");
@@ -441,11 +393,8 @@ bool Capture::queueBuffers()
     
     log.status("Queuing capture buffers");
     // Fill v4l2_buffer struct
-    buf.type = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? 
-        V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     
     if(m_is_mp_device){
         buf.m.planes = planes;
@@ -472,9 +421,7 @@ bool Capture::streamOn()
     Logger& log = m_logger;
 
     // Start streaming
-    enum v4l2_buf_type type = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    enum v4l2_buf_type type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
     
     if(!xioctl(m_fd, VIDIOC_STREAMON, &type)){
         log.error("VIDIOC_STREAMON failed");
@@ -552,11 +499,8 @@ bool Capture::saveOneFrame(const std::string& path)
     }
 
     // Prepare v4l2_buffer struct
-    buf.type = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? 
-        V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     
     if(m_is_mp_device){
         buf.m.planes = planes;
@@ -564,8 +508,7 @@ bool Capture::saveOneFrame(const std::string& path)
     }
     
     // Dequeue buffer
-    if(!xioctl(m_fd, VIDIOC_DQBUF, &buf)){ // this will block when no buffer 
-                                           // is in the driver's outgoing queue.
+    if(!xioctl(m_fd, VIDIOC_DQBUF, &buf)){ // This will block when no buffer is in the driver's outgoing queue.
         log.error("VIDIOC_DQBUF failed");
         return false;
     }
@@ -585,14 +528,12 @@ bool Capture::saveOneFrame(const std::string& path)
     if(m_is_mp_device){
         for(unsigned int p = 0; p < buf.length; p++){
             if(planes[p].bytesused > 0){
-                outfile.write(static_cast<const char*>
-                    (m_capture_buf[buf.index].plane_addr[p]), 
-                    planes[p].bytesused);
+                outfile.write(static_cast<const char*>(m_capture_buf[buf.index].plane_addr[p]), planes[p].bytesused);
                 // Check if write okay
                 if(outfile.fail()){
-                    log.error("Failed to write plane %d to file: %s", 
-                        p, strerror(errno));
+                    log.error("Failed to write plane %d to file: %s", p, strerror(errno));
                     outfile.close();
+
                     // Re-queue buffer before returning
                     xioctl(m_fd, VIDIOC_QBUF, &buf);
                     return false;
@@ -619,10 +560,7 @@ bool Capture::streamOff()
     Logger& log = m_logger;
 
     // Stop streaming
-    enum v4l2_buf_type type = m_is_mp_device ? 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : 
-        V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    
+    enum v4l2_buf_type type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if(!xioctl(m_fd, VIDIOC_STREAMOFF, &type)){
         log.error("VIDIOC_STREAMOFF failed");
         return false;
@@ -657,8 +595,7 @@ Capture::~Capture()
     for(unsigned int i = 0; i < m_config.buf_count; i++){
         for(unsigned int p = 0; p < VIDEO_MAX_PLANES; p++){
             if(m_capture_buf[i].plane_addr[p] != nullptr){
-                munmap(m_capture_buf[i].plane_addr[p], 
-                    m_capture_buf[i].plane_size[p]);
+                munmap(m_capture_buf[i].plane_addr[p], m_capture_buf[i].plane_size[p]);
                 m_capture_buf[i].plane_addr[p] = nullptr;
             }
         }
