@@ -19,7 +19,7 @@
 
 cmake_minimum_required(VERSION 3.10)
 
-project(rk_capture 
+project(camcap
     VERSION 0.1.0 
     DESCRIPTION "Video Capture App for Rockchip radxa 5a"
     LANGUAGES CXX
@@ -66,7 +66,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # Installation
 install(TARGETS ${PROJECT_NAME} 
-    RUNTIME DESTINATION bin
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 message(STATUS "")
