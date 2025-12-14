@@ -21,47 +21,40 @@
  */
 
 #include <iostream>
+#include <csignal>
+#include <atomic>
 
 #include "helpers.hpp"
-#include "capture.hpp"
+#include "display.hpp"
 
-#define ISP_MAINPATH    "/dev/video11"
+static std::atomic<bool> running(true);
 
-int main(int argc, char* argv[]){
+void signalHandler(int signal)
+{
+    if(signal == SIGINT){
+        running = false;
+    }
+}
 
+int main(int argc, char* argv[])
+{
     (void) argc;
     (void) argv;
 
-    // Init capture
-    capture_config conf;
-    conf.fmt_fourcc = "NV12";
-    conf.width = 1920;
-    conf.height = 1080;
-    conf.mem_type = TYPE_MMAP;
-    conf.buf_count = 5;
+    // Setup signal handler for Ctrl+C
+    std::signal(SIGINT, signalHandler);
 
-    printf("[MAIN] Starting Capture...\n");
+    // Init display
+    Display disp(true);
+    printf("[MAIN] Initialize display...\n");
+    disp.initialize();
 
-    Capture capture(ISP_MAINPATH, conf, true);
-    
-    if(!capture.start()){
-        printf("start Faild !\n");
-        return -1;
+    // Scanout
+    printf("[MAIN] Starting loop (Press Ctrl+C to exit)...\n");
+    while(running){
+        disp.scanout();
     }
 
-    printf("[MAIN] Saving one Frame...\n");
-
-    if(!capture.saveOneFrame("frame.yuv")){
-        printf("saveOneFrame Faild !\n");
-        return -1;
-    }
-
-    printf("[MAIN] Stopping Capture...\n");
-
-    if(!capture.stop()){
-        printf("stop Faild !\n");
-        return -1;
-    }
-
+    printf("[MAIN] Exiting...\n");
     return 0;
 }
