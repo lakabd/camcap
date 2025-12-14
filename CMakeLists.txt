@@ -33,10 +33,16 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Dependencies
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(DRM REQUIRED libdrm)
+pkg_check_modules(GBM REQUIRED gbm)
+
 # Source files
 set(sources
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/capture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/display.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/logger.cpp
 )
@@ -45,6 +51,7 @@ set(sources
 set(headers
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/helpers.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/capture.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/include/display.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/logger.hpp    
 )
 
@@ -62,6 +69,14 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+    ${DRM_INCLUDE_DIRS}
+    ${GBM_INCLUDE_DIRS}
+)
+
+# Link
+target_link_libraries(${PROJECT_NAME} PRIVATE 
+    ${DRM_LIBRARIES}
+    ${GBM_LIBRARIES}
 )
 
 # Installation
