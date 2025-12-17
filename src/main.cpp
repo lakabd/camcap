@@ -40,19 +40,29 @@ int main(int argc, char* argv[])
 {
     (void) argc;
     (void) argv;
+    bool ret = false;
 
     // Setup signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
 
     // Init display
     Display disp(true);
+    
     printf("[MAIN] Initialize display...\n");
-    disp.initialize();
+    ret = disp.initialize();
+    if(!ret){
+        printf("[MAIN] Error on display initialize() !\n");
+        return -1;
+    }
 
     // Scanout
     printf("[MAIN] Starting loop (Press Ctrl+C to exit)...\n");
     while(running){
-        disp.scanout();
+        ret = disp.scanout();
+        if(!ret){
+            printf("[MAIN] Error on display scanout() !\n");
+            return -1;
+        }
     }
 
     printf("[MAIN] Exiting...\n");

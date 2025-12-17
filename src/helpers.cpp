@@ -108,3 +108,37 @@ void print_v4l2_device_caps(__u32 caps)
         printf("\t%s\n", cap_name);
     }
 }
+
+void print_drmModeRes(drmModeResPtr res)
+{
+    if(!res){
+        printf("%s: drmModeRes is NULL\n", __func__);
+        return;
+    }
+
+    printf("=== DRM Mode Resources ===\n");
+    printf("Framebuffers: %d\n", res->count_fbs);
+    for(int i = 0; i < res->count_fbs; i++){
+        printf("  FB[%d]: %u\n", i, res->fbs[i]);
+    }
+
+    printf("CRTCs: %d\n", res->count_crtcs);
+    for(int i = 0; i < res->count_crtcs; i++){
+        printf("  CRTC[%d]: %u\n", i, res->crtcs[i]);
+    }
+
+    printf("Connectors: %d\n", res->count_connectors);
+    for(int i = 0; i < res->count_connectors; i++){
+        printf("  Connector[%d]: %u\n", i, res->connectors[i]);
+    }
+
+    printf("Encoders: %d\n", res->count_encoders);
+    for(int i = 0; i < res->count_encoders; i++){
+        printf("  Encoder[%d]: %u\n", i, res->encoders[i]);
+    }
+
+    printf("Display size range:\n");
+    printf("  Width:  %u - %u\n", res->min_width, res->max_width);
+    printf("  Height: %u - %u\n", res->min_height, res->max_height);
+    printf("==========================\n");
+}

@@ -24,6 +24,12 @@
 
 #include <cstring>
 #include <linux/videodev2.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
 
+// V4L2
 bool xioctl(int fd, unsigned long req, void *arg);
 void print_v4l2_device_caps(__u32 caps);
+
+// DRM
+void print_drmModeRes(drmModeRes *res);

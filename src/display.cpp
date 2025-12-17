@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "display.hpp"
+#include "helpers.hpp"
 
 
 Display::Display(bool verbose)
@@ -53,9 +54,34 @@ Display::Display(bool verbose)
     log.info("GBM backend: %s", gbm_device_get_backend_name(m_gbmDev));
 }
 
+bool Display::getRessources()
+{
+    Logger& log = m_logger;
+    log.status("Acquiring card ressources.");
+
+    m_drmRes = drmModeGetResources(m_drmFd);
+    if(!m_drmRes){
+        log.error("drmModeGetResources: failed to get DRM ressources");
+        return false;
+    }
+
+    if(log.get_verbose()){
+        print_drmModeRes(m_drmRes);
+    }
+
+    return true;
+}
+
 bool Display::initialize()
 {
-    //TODO
+    Logger& log = m_logger;
+
+    // Get DRM ressources
+    if(!getRessources()){
+        log.error("getRessources() failed !");
+        return false;
+    }
+
     return true;
 }
 
@@ -70,8 +96,16 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
     
-    // Distro GBM device
-    gbm_device_destroy(m_gbmDev);
+    // Distroy DRM ressources
+    if(m_drmRes){
+        drmModeFreeResources(m_drmRes);
+    }
+    // Distroy GBM device
+    if(m_gbmDev){
+        gbm_device_destroy(m_gbmDev);
+    }
     // Close DRM fd
-    close(m_drmFd);
+    if(m_drmFd){
+        (m_drmFd);
+    }
 }
