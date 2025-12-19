@@ -35,6 +35,9 @@ private:
     drmModeConnector *m_drmConnector;
     drmModeEncoder *m_drmEncoder;
     drmModeCrtc *m_drmCrtc;
+    drmModeModeInfo m_modeSettings;
+    uint32_t m_connectorId;
+
     struct gbm_device *m_gbmDev;
     struct gbm_bo *m_bo;
     struct gbm_surface *m_gbmSurface;

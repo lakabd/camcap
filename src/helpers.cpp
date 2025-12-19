@@ -109,7 +109,7 @@ void print_v4l2_device_caps(__u32 caps)
     }
 }
 
-void print_drmModeRes(drmModeResPtr res)
+void print_drmModeRes(drmModeRes *res)
 {
     if(!res){
         printf("%s: drmModeRes is NULL\n", __func__);
@@ -141,4 +141,104 @@ void print_drmModeRes(drmModeResPtr res)
     printf("  Width:  %u - %u\n", res->min_width, res->max_width);
     printf("  Height: %u - %u\n", res->min_height, res->max_height);
     printf("==========================\n");
+}
+
+const char* get_connector_type_name(uint32_t type)
+{
+    switch(type){ 
+        case DRM_MODE_CONNECTOR_Unknown: return "Unknown";
+        case DRM_MODE_CONNECTOR_VGA: return "VGA";
+        case DRM_MODE_CONNECTOR_DVII: return "DVI-I";
+        case DRM_MODE_CONNECTOR_DVID: return "DVI-D";
+        case DRM_MODE_CONNECTOR_DVIA: return "DVI-A";
+        case DRM_MODE_CONNECTOR_Composite: return "Composite";
+        case DRM_MODE_CONNECTOR_SVIDEO: return "S-Video";
+        case DRM_MODE_CONNECTOR_LVDS: return "LVDS";
+        case DRM_MODE_CONNECTOR_Component: return "Component";
+        case DRM_MODE_CONNECTOR_9PinDIN: return "9PinDIN";
+        case DRM_MODE_CONNECTOR_DisplayPort: return "DisplayPort";
+        case DRM_MODE_CONNECTOR_HDMIA: return "HDMI-A";
+        case DRM_MODE_CONNECTOR_HDMIB: return "HDMI-B";
+        case DRM_MODE_CONNECTOR_TV: return "TV";
+        case DRM_MODE_CONNECTOR_eDP: return "eDP";
+        case DRM_MODE_CONNECTOR_VIRTUAL: return "Virtual";
+        case DRM_MODE_CONNECTOR_DSI: return "DSI";
+        case DRM_MODE_CONNECTOR_DPI: return "DPI";
+        case DRM_MODE_CONNECTOR_WRITEBACK: return "Writeback";
+        case DRM_MODE_CONNECTOR_SPI: return "SPI";
+        case DRM_MODE_CONNECTOR_USB: return "USB";
+        default: return "Unknown";
+    }
+}
+
+void print_drmModeConnector(int drmfd, drmModeConnector *conn)
+{
+    if(!conn){
+        printf("%s: drmModeConnector is NULL\n", __func__);
+        return;
+    }
+
+    printf("=== DRM Connector ===\n");
+    printf("Connector ID: %u\n", conn->connector_id);
+    printf("Encoder ID: %u\n", conn->encoder_id);
+    printf("Connector Type: %s\n", get_connector_type_name(conn->connector_type));
+    
+    printf("Connection Status: ");
+    switch(conn->connection){
+        case DRM_MODE_CONNECTED:
+            printf("CONNECTED\n");
+            break;
+        case DRM_MODE_DISCONNECTED:
+            printf("DISCONNECTED\n");
+            break;
+        case DRM_MODE_UNKNOWNCONNECTION:
+            printf("UNKNOWN\n");
+            break;
+        default:
+            printf("%d\n", conn->connection);
+            break;
+    }
+    
+    printf("Physical Size: %u x %u mm\n", conn->mmWidth, conn->mmHeight);
+    printf("Subpixel: %u\n", conn->subpixel);
+    
+    printf("\nModes: %d\n", conn->count_modes);
+    for(int i = 0; i < conn->count_modes; i++){
+        drmModeModeInfoPtr mode = &conn->modes[i];
+        printf("  Mode[%d]: %s - %ux%u @%uHz\n", 
+               i, mode->name, mode->hdisplay, mode->vdisplay, mode->vrefresh);
+    }
+    
+    printf("\nProperties: %d\n", conn->count_props);
+    for(int i = 0; i < conn->count_props; i++){
+        drmModePropertyPtr prop = drmModeGetProperty(drmfd, conn->props[i]);
+        if(prop){
+            printf(" ID=%u -> %s \t= ", conn->props[i], prop->name);
+            
+            // Print value based on property type
+            if(prop->flags & DRM_MODE_PROP_BLOB){
+                printf("[blob: %lu]\n", conn->prop_values[i]);
+            } 
+            else if(prop->flags & DRM_MODE_PROP_ENUM){
+                // For enums, find the name
+                for(int j = 0; j < prop->count_enums; j++){
+                    if(prop->enums[j].value == conn->prop_values[i]){
+                        printf("%s\n", prop->enums[j].name);
+                        break;
+                    }
+                }
+            }
+            else{
+                printf("%lu\n", conn->prop_values[i]);
+            }
+            
+            drmModeFreeProperty(prop);
+        }
+    }
+    
+    printf("\nEncoders: %d\n", conn->count_encoders);
+    for(int i = 0; i < conn->count_encoders; i++){
+        printf("  Encoder[%d]: %u\n", i, conn->encoders[i]);
+    }
+    printf("====================\n");
 }

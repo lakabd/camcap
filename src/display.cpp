@@ -72,6 +72,35 @@ bool Display::getRessources()
     return true;
 }
 
+bool Display::findConnector()
+{
+    Logger& log = m_logger;
+    log.status("Finding connector.");
+
+    for (int i = 0; i < m_drmRes->count_connectors; i++) {
+        m_drmConnector = drmModeGetConnector(m_drmFd, m_drmRes->connectors[i]);
+        if (m_drmConnector->connection == DRM_MODE_CONNECTED && m_drmConnector->count_modes > 0) {
+            m_connectorId = m_drmConnector->connector_id;
+            m_modeSettings = m_drmConnector->modes[0]; // Use first (usually preferred) mode
+            log.info("Found connected display: %dx%d @%dHz", m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_modeSettings.vrefresh);
+            break;
+        }
+        drmModeFreeConnector(m_drmConnector);
+        m_drmConnector = nullptr;
+    }
+
+    if (!m_drmConnector) {
+        log.error("drmModeGetConnector: No connected display found !");
+        return false;
+    }
+
+    if(log.get_verbose()){
+        print_drmModeConnector(m_drmFd, m_drmConnector);
+    }
+
+    return true;
+}
+
 bool Display::initialize()
 {
     Logger& log = m_logger;
@@ -79,6 +108,12 @@ bool Display::initialize()
     // Get DRM ressources
     if(!getRessources()){
         log.error("getRessources() failed !");
+        return false;
+    }
+
+    // Find connected display
+    if(!findConnector()){
+        log.error("findConnector() failed !");
         return false;
     }
 
@@ -95,7 +130,11 @@ Display::~Display()
 {
     Logger& log = m_logger;
     log.status("Quitting...");
-    
+
+    // Distroy DRM connector
+    if(m_drmConnector){
+        drmModeFreeConnector(m_drmConnector);
+    }
     // Distroy DRM ressources
     if(m_drmRes){
         drmModeFreeResources(m_drmRes);

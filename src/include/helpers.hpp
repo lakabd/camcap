@@ -33,3 +33,4 @@ void print_v4l2_device_caps(__u32 caps);
 
 // DRM
 void print_drmModeRes(drmModeRes *res);
+void print_drmModeConnector(int drmfd, drmModeConnector *conn);
