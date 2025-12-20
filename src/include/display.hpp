@@ -37,6 +37,7 @@ private:
     drmModeCrtc *m_drmCrtc;
     drmModeModeInfo m_modeSettings;
     uint32_t m_connectorId;
+    uint32_t m_crtcId;
 
     struct gbm_device *m_gbmDev;
     struct gbm_bo *m_bo;

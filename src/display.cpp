@@ -29,7 +29,7 @@
 
 
 Display::Display(bool verbose)
-    : m_drmFd(-1), m_drmRes(nullptr), m_drmConnector(nullptr), m_drmEncoder(nullptr), m_drmCrtc(nullptr), m_connectorId(0),
+    : m_drmFd(-1), m_drmRes(nullptr), m_drmConnector(nullptr), m_drmEncoder(nullptr), m_drmCrtc(nullptr), m_connectorId(0), m_crtcId(0),
     m_gbmDev(nullptr), m_bo(nullptr), m_gbmSurface(nullptr), m_logger("display", verbose)
 {
     Logger& log = m_logger;
@@ -135,6 +135,44 @@ bool Display::findEncoder()
     return true;
 }
 
+bool Display::findCrtc()
+{
+    Logger& log = m_logger;
+    log.status("Finding crtc...");
+
+    // Try to use current CRTC if available
+    if(m_drmEncoder->crtc_id){
+        m_drmCrtc = drmModeGetCrtc(m_drmFd, m_drmEncoder->crtc_id);
+        if(m_drmCrtc){
+            log.info("Using encoder's current CRTC: ID %d", m_drmCrtc->crtc_id);
+        }
+    }
+
+    // If no current CRTC, find a compatible one from possible_crtcs bitmask
+    if(!m_drmCrtc){
+        for(int i = 0; i < m_drmRes->count_crtcs; i++){
+            if(m_drmEncoder->possible_crtcs & (1 << i)){
+                m_crtcId = m_drmRes->crtcs[i];
+                m_drmCrtc = drmModeGetCrtc(m_drmFd, m_crtcId);
+                if(m_drmCrtc){
+                    log.info("Found compatible CRTC: ID %d", m_drmCrtc->crtc_id);
+                }
+            }
+        }
+    }
+
+    if(!m_drmCrtc){
+        log.error("drmModeGetCrtc: No CRTC was found !");
+        return false;
+    }
+
+    if(log.get_verbose()){
+        print_drmModeCrtc(m_drmCrtc);
+    }
+
+    return true;
+}
+
 bool Display::initialize()
 {
     Logger& log = m_logger;
@@ -157,6 +195,12 @@ bool Display::initialize()
         return false;
     }
 
+    // Find Crtc
+    if(!findCrtc()){
+        log.error("findCrtc() failed !");
+        return false;
+    }
+
     return true;
 }
 
@@ -171,6 +215,10 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
 
+    // Free DRM crtc
+    if(m_drmCrtc){
+        drmModeFreeCrtc(m_drmCrtc);
+    }
     // Free DRM encoder
     if(m_drmEncoder){
         drmModeFreeEncoder(m_drmEncoder);

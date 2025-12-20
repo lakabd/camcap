@@ -288,3 +288,29 @@ void print_drmModeEncoder(drmModeEncoder *enc)
     printf("Possible Clones: 0x%08x (bitmask)\n", enc->possible_clones);
     printf("===================\n");
 }
+
+void print_drmModeCrtc(drmModeCrtc *crtc)
+{
+    if(!crtc){
+        printf("%s: drmModeCrtc is NULL\n", __func__);
+        return;
+    }
+
+    printf("=== DRM CRTC ===\n");
+    printf("CRTC ID: %u\n", crtc->crtc_id);
+    printf("Buffer ID: %u%s\n", crtc->buffer_id, crtc->buffer_id == 0 ? " (disconnected)" : "");
+    printf("Position: (%u, %u)\n", crtc->x, crtc->y);
+    printf("Size: %u x %u\n", crtc->width, crtc->height);
+    printf("Mode Valid: %s\n", crtc->mode_valid ? "Yes" : "No");
+    
+    if(crtc->mode_valid){
+        printf("Current Mode:\n");
+        printf("  Name: %s\n", crtc->mode.name);
+        printf("  Resolution: %u x %u\n", crtc->mode.hdisplay, crtc->mode.vdisplay);
+        printf("  Refresh Rate: %u Hz\n", crtc->mode.vrefresh);
+        printf("  Clock: %u kHz\n", crtc->mode.clock);
+    }
+    
+    printf("Gamma Size: %d\n", crtc->gamma_size);
+    printf("================\n");
+}
