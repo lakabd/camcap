@@ -29,8 +29,8 @@
 
 
 Display::Display(bool verbose)
-    : m_drmFd(-1), m_drmRes(nullptr), m_drmConnector(nullptr), m_drmEncoder(nullptr), m_drmCrtc(nullptr), m_gbmDev(nullptr), m_bo(nullptr), 
-    m_gbmSurface(nullptr), m_logger("display", verbose)
+    : m_drmFd(-1), m_drmRes(nullptr), m_drmConnector(nullptr), m_drmEncoder(nullptr), m_drmCrtc(nullptr), m_connectorId(0),
+    m_gbmDev(nullptr), m_bo(nullptr), m_gbmSurface(nullptr), m_logger("display", verbose)
 {
     Logger& log = m_logger;
 
@@ -57,7 +57,7 @@ Display::Display(bool verbose)
 bool Display::getRessources()
 {
     Logger& log = m_logger;
-    log.status("Acquiring card ressources.");
+    log.status("Acquiring card ressources...");
 
     m_drmRes = drmModeGetResources(m_drmFd);
     if(!m_drmRes){
@@ -75,11 +75,11 @@ bool Display::getRessources()
 bool Display::findConnector()
 {
     Logger& log = m_logger;
-    log.status("Finding connector.");
+    log.status("Finding connector...");
 
-    for (int i = 0; i < m_drmRes->count_connectors; i++) {
+    for(int i = 0; i < m_drmRes->count_connectors; i++){
         m_drmConnector = drmModeGetConnector(m_drmFd, m_drmRes->connectors[i]);
-        if (m_drmConnector->connection == DRM_MODE_CONNECTED && m_drmConnector->count_modes > 0) {
+        if(m_drmConnector->connection == DRM_MODE_CONNECTED && m_drmConnector->count_modes > 0){
             m_connectorId = m_drmConnector->connector_id;
             m_modeSettings = m_drmConnector->modes[0]; // Use first (usually preferred) mode
             log.info("Found connected display: %dx%d @%dHz", m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_modeSettings.vrefresh);
@@ -89,13 +89,47 @@ bool Display::findConnector()
         m_drmConnector = nullptr;
     }
 
-    if (!m_drmConnector) {
+    if(!m_drmConnector){
         log.error("drmModeGetConnector: No connected display found !");
         return false;
     }
 
     if(log.get_verbose()){
         print_drmModeConnector(m_drmFd, m_drmConnector);
+    }
+
+    return true;
+}
+
+bool Display::findEncoder()
+{
+    Logger& log = m_logger;
+    log.status("Finding encoder...");
+
+    // Try to use current encoder if available
+    if(m_drmConnector->encoder_id){
+        m_drmEncoder = drmModeGetEncoder(m_drmFd, m_drmConnector->encoder_id);
+        log.info("Using connector's current encoder: ID %d", m_drmEncoder->encoder_id);
+    }
+
+    // If no current encoder, find a compatible one
+    if(!m_drmEncoder){
+        for(int i = 0; i < m_drmConnector->count_encoders; i++){
+            m_drmEncoder = drmModeGetEncoder(m_drmFd, m_drmConnector->encoders[i]);
+            if(m_drmEncoder){
+                log.info("Using encoder ID: %d", m_drmEncoder->encoder_id);
+                break; 
+            }
+        }
+    }
+
+    if(!m_drmEncoder){
+        log.error("drmModeGetEncoder: No encoder was found !");
+        return false;
+    }
+
+    if(log.get_verbose()){
+        print_drmModeEncoder(m_drmEncoder);
     }
 
     return true;
@@ -117,6 +151,12 @@ bool Display::initialize()
         return false;
     }
 
+    // Find encoder
+    if(!findEncoder()){
+        log.error("findEncoder() failed !");
+        return false;
+    }
+
     return true;
 }
 
@@ -131,11 +171,15 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
 
-    // Distroy DRM connector
+    // Free DRM encoder
+    if(m_drmEncoder){
+        drmModeFreeEncoder(m_drmEncoder);
+    }
+    // Free DRM connector
     if(m_drmConnector){
         drmModeFreeConnector(m_drmConnector);
     }
-    // Distroy DRM ressources
+    // Free DRM ressources
     if(m_drmRes){
         drmModeFreeResources(m_drmRes);
     }

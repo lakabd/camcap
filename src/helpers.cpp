@@ -242,3 +242,49 @@ void print_drmModeConnector(int drmfd, drmModeConnector *conn)
     }
     printf("====================\n");
 }
+
+const char* get_encoder_type_name(uint32_t type)
+{
+    switch(type){
+        case DRM_MODE_ENCODER_NONE: return "None";
+        case DRM_MODE_ENCODER_DAC: return "DAC";
+        case DRM_MODE_ENCODER_TMDS: return "TMDS";
+        case DRM_MODE_ENCODER_LVDS: return "LVDS";
+        case DRM_MODE_ENCODER_TVDAC: return "TVDAC";
+        case DRM_MODE_ENCODER_VIRTUAL: return "Virtual";
+        case DRM_MODE_ENCODER_DSI: return "DSI";
+        case DRM_MODE_ENCODER_DPMST: return "DPMST";
+        case DRM_MODE_ENCODER_DPI: return "DPI";
+        default: return "Unknown";
+    }
+}
+
+void print_drmModeEncoder(drmModeEncoder *enc)
+{
+    if(!enc){
+        printf("%s: drmModeEncoder is NULL\n", __func__);
+        return;
+    }
+
+    printf("=== DRM Encoder ===\n");
+    printf("Encoder ID: %u\n", enc->encoder_id);
+    printf("Encoder Type: %s (%u)\n", get_encoder_type_name(enc->encoder_type), enc->encoder_type);
+    printf("Current CRTC ID: %u\n", enc->crtc_id);
+    
+    printf("Possible CRTCs: 0x%08x (bitmask)\n", enc->possible_crtcs);
+    printf("  Compatible CRTC indices: ");
+    bool first = true;
+    for(int i = 0; i < 32; i++){
+        if(enc->possible_crtcs & (1 << i)){
+            if(!first){
+                printf(", ");
+            }
+            printf("%d", i);
+            first = false;
+        }
+    }
+    printf("\n");
+    
+    printf("Possible Clones: 0x%08x (bitmask)\n", enc->possible_clones);
+    printf("===================\n");
+}
