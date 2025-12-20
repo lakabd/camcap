@@ -27,6 +27,8 @@
 #include "helpers.hpp"
 #include "display.hpp"
 
+#define APP_VERBOSITY true
+
 static std::atomic<bool> running(true);
 
 void signalHandler(int signal)
@@ -46,7 +48,10 @@ int main(int argc, char* argv[])
     std::signal(SIGINT, signalHandler);
 
     // Init display
-    Display disp(true);
+    display_config conf;
+    conf.fmt_fourcc = "XR24"; // XRGB8888
+    conf.display_and_gpu = true;
+    Display disp(conf, APP_VERBOSITY);
     
     printf("[MAIN] Initialize display...\n");
     ret = disp.initialize();

@@ -28,11 +28,14 @@
 #include "helpers.hpp"
 
 
-Display::Display(bool verbose)
-    : m_drmFd(-1), m_drmRes(nullptr), m_drmConnector(nullptr), m_drmEncoder(nullptr), m_drmCrtc(nullptr), m_connectorId(0), m_crtcId(0),
-    m_gbmDev(nullptr), m_bo(nullptr), m_gbmSurface(nullptr), m_logger("display", verbose)
+Display::Display(display_config& conf, bool verbose)
+    : m_config(conf), m_logger("display", verbose)
 {
     Logger& log = m_logger;
+
+    // Sanity check
+    if(conf.fmt_fourcc.length() != 4)
+        log.fatal("Display buffer format must be a 4-character string (e.g., 'NV12')");
 
     // Open DRM device
     const char* drmDevices[] = {"/dev/dri/card0", "/dev/dri/card1", "/dev/dri/renderD128"};

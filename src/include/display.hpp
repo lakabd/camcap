@@ -28,21 +28,38 @@
 #include <xf86drmMode.h>
 #include "logger.hpp"
 
+/**
+ * @brief Configuration structure for display settings.
+ * 
+ * @var display_config::fmt_fourcc
+ * The FourCC (Four Character Code) format string that specifies the
+ * pixel format for the display (e.g., "YUYV", "MJPG", "RGB3").
+ * 
+ * @var display_config::display_and_gpu
+ * Flag indicating whether the reserverd surface will be used for scanout
+ * and rendering i.e., accessible by display unit AND gpu
+ */
+struct display_config {
+    std::string fmt_fourcc;
+    bool display_and_gpu;
+};
+
 class Display {
 private:
-    int m_drmFd;
-    drmModeRes *m_drmRes;
-    drmModeConnector *m_drmConnector;
-    drmModeEncoder *m_drmEncoder;
-    drmModeCrtc *m_drmCrtc;
-    drmModeModeInfo m_modeSettings;
-    uint32_t m_connectorId;
-    uint32_t m_crtcId;
+    int m_drmFd{-1};
+    drmModeRes *m_drmRes{nullptr};
+    drmModeConnector *m_drmConnector{nullptr};
+    drmModeEncoder *m_drmEncoder{nullptr};
+    drmModeCrtc *m_drmCrtc{nullptr};
+    drmModeModeInfo m_modeSettings{};
+    uint32_t m_connectorId{0};
+    uint32_t m_crtcId{0};
 
-    struct gbm_device *m_gbmDev;
-    struct gbm_bo *m_bo;
-    struct gbm_surface *m_gbmSurface;
+    struct gbm_device *m_gbmDev{nullptr};
+    struct gbm_bo *m_bo{nullptr};
+    struct gbm_surface *m_gbmSurface{nullptr};
 
+    display_config& m_config;
     Logger m_logger;
 
     bool getRessources();
@@ -51,7 +68,7 @@ private:
     bool findCrtc();
 
 public:
-    Display(bool verbose);
+    Display(display_config& conf, bool verbose);
     ~Display();
 
     bool initialize();
