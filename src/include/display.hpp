@@ -66,6 +66,7 @@ private:
     bool findConnector();
     bool findEncoder();
     bool findCrtc();
+    bool createGbmSurface();
 
 public:
     Display(display_config& conf, bool verbose);
