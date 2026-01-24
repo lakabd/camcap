@@ -51,13 +51,12 @@ private:
     drmModeConnector *m_drmConnector{nullptr};
     drmModeEncoder *m_drmEncoder{nullptr};
     drmModeCrtc *m_drmCrtc{nullptr};
-    drmModeModeInfo m_modeSettings{};
+    drmModeModeInfo m_modeSettings{}; // Display preferred mode
     uint32_t m_connectorId{0};
     uint32_t m_crtcId{0};
 
     struct gbm_device *m_gbmDev{nullptr};
     struct gbm_bo *m_bo{nullptr};
-    struct gbm_surface *m_gbmSurface{nullptr};
 
     display_config& m_config;
     Logger m_logger;
@@ -66,7 +65,6 @@ private:
     bool findConnector();
     bool findEncoder();
     bool findCrtc();
-    bool createGbmSurface();
 
 public:
     Display(display_config& conf, bool verbose);

@@ -55,6 +55,17 @@ Display::Display(display_config& conf, bool verbose)
         log.fatal("Failed to create GBM device");
     }
     log.info("GBM backend: %s", gbm_device_get_backend_name(m_gbmDev));
+
+    // Validate requested format
+    std::string& fourcc = conf.fmt_fourcc;
+    uint32_t gbm_flags = GBM_BO_USE_SCANOUT;
+    if(conf.display_and_gpu){
+        gbm_flags |= GBM_BO_USE_RENDERING;
+    }
+    uint32_t gbm_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
+    if(gbm_device_is_format_supported(m_gbmDev, gbm_format, gbm_flags) == 0){
+        log.fatal("Specified format " + fourcc + " is NOT supported");
+    }
 }
 
 bool Display::getRessources()
@@ -176,36 +187,6 @@ bool Display::findCrtc()
     return true;
 }
 
-bool Display::createGbmSurface()
-{
-    Logger& log = m_logger;
-    
-    // Validate requested format
-    std::string& fourcc = m_config.fmt_fourcc;
-    uint32_t gbm_flags = GBM_BO_USE_SCANOUT;
-    if(m_config.display_and_gpu){
-        gbm_flags |= GBM_BO_USE_RENDERING;
-    }
-    uint32_t gbm_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
-    if(gbm_device_is_format_supported(m_gbmDev, gbm_format, gbm_flags) == 0){
-        log.error("Specified format %s is NOT supported", fourcc.c_str());
-        return false;
-    }
-
-    // Create surface
-    log.status("Creating GBM surface: %dx%d (%s)", m_modeSettings.hdisplay, m_modeSettings.vdisplay, fourcc.c_str());
-
-    m_gbmSurface = gbm_surface_create(m_gbmDev, m_modeSettings.hdisplay, m_modeSettings.vdisplay, gbm_format, gbm_flags);
-    if(!m_gbmSurface){
-        log.error("Failed to create GBM surface");
-        return false;
-    }
-
-    log.info("GBM surface Created successfully: %p", m_gbmSurface);
-
-    return true;
-}
-
 bool Display::initialize()
 {
     Logger& log = m_logger;
@@ -234,12 +215,6 @@ bool Display::initialize()
         return false;
     }
 
-    // Create GBM surface
-    if(!createGbmSurface()){
-        log.error("createGbmSurface() failed !");
-        return false;
-    }
-
     return true;
 }
 
@@ -254,10 +229,6 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
 
-    // Distroy GBM surface
-    if(m_gbmSurface){
-        gbm_surface_destroy(m_gbmSurface);
-    }
     // Free DRM crtc
     if(m_drmCrtc){
         drmModeFreeCrtc(m_drmCrtc);
