@@ -23,6 +23,8 @@
 #include <iostream>
 #include <csignal>
 #include <atomic>
+#include <thread>
+#include <chrono>
 
 #include "helpers.hpp"
 #include "display.hpp"
@@ -49,8 +51,7 @@ int main(int argc, char* argv[])
 
     // Init display
     display_config conf;
-    conf.fmt_fourcc = "XR24"; // XRGB8888
-    conf.display_and_gpu = true;
+    conf.use_test_patern = true;
     Display disp(conf, APP_VERBOSITY);
     
     printf("[MAIN] Initialize display...\n");
@@ -68,6 +69,7 @@ int main(int argc, char* argv[])
             printf("[MAIN] Error on display scanout() !\n");
             return -1;
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }
 
     printf("[MAIN] Exiting...\n");

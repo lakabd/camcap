@@ -28,20 +28,17 @@
 #include <xf86drmMode.h>
 #include "logger.hpp"
 
-/**
- * @brief Configuration structure for display settings.
- * 
- * @var display_config::fmt_fourcc
- * The FourCC (Four Character Code) format string that specifies the
- * pixel format for the display (e.g., "YUYV", "MJPG", "RGB3").
- * 
- * @var display_config::display_and_gpu
- * Flag indicating whether the reserverd surface will be used for scanout
- * and rendering i.e., accessible by display unit AND gpu
- */
 struct display_config {
-    std::string fmt_fourcc;
-    bool display_and_gpu;
+    std::string buf_fourcc;
+    uint32_t buf_width;
+    uint32_t buf_height;
+    uint32_t buf_stride;
+    uint32_t buf_fd; // The DMA_BUF file descriptor associated with the buffer.
+
+    /* Test display.
+    * When enabled, above settings are ignored and buf dimensions are set to match display mode & buf_fourcc defaults to XR24.
+    */
+    bool use_test_patern; 
 };
 
 class Display {
@@ -51,13 +48,16 @@ private:
     drmModeConnector *m_drmConnector{nullptr};
     drmModeEncoder *m_drmEncoder{nullptr};
     drmModeCrtc *m_drmCrtc{nullptr};
-    drmModeModeInfo m_modeSettings{}; // Display preferred mode
+    drmModeModeInfo m_modeSettings{}; // Holds display preferred mode
     uint32_t m_connectorId{0};
     uint32_t m_crtcId{0};
+    uint32_t m_fbId{0};
 
     struct gbm_device *m_gbmDev{nullptr};
+    uint32_t m_gbm_flags{0};
     struct gbm_bo *m_bo{nullptr};
-
+    uint32_t m_format{0}; // used DRM/GBM format
+    
     display_config& m_config;
     Logger m_logger;
 
@@ -65,6 +65,8 @@ private:
     bool findConnector();
     bool findEncoder();
     bool findCrtc();
+    bool importGbmBoFromFD();
+    bool testPatern();
 
 public:
     Display(display_config& conf, bool verbose);
