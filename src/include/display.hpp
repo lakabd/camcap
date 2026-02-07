@@ -49,8 +49,10 @@ private:
     drmModeEncoder *m_drmEncoder{nullptr};
     drmModeCrtc *m_drmCrtc{nullptr};
     drmModeModeInfo m_modeSettings{}; // Holds display preferred mode
+    drmModePlane *m_drmPlane{nullptr};
     uint32_t m_connectorId{0};
     uint32_t m_crtcId{0};
+    uint32_t m_planeId{0};
     uint32_t m_fbId{0};
 
     struct gbm_device *m_gbmDev{nullptr};
@@ -65,6 +67,7 @@ private:
     bool findConnector();
     bool findEncoder();
     bool findCrtc();
+    bool findPlane();
     bool importGbmBoFromFD();
     bool testPatern();
 

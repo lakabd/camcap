@@ -314,3 +314,27 @@ void print_drmModeCrtc(drmModeCrtc *crtc)
     printf("Gamma Size: %d\n", crtc->gamma_size);
     printf("================\n");
 }
+
+void print_drmModePlane(drmModePlane *plane)
+{
+    if(!plane){
+        printf("%s: drmModePlane is NULL\n", __func__);
+        return;
+    }
+
+    printf("=== DRM Plane ===\n");
+    printf("Plane ID: %u\n", plane->plane_id);
+    printf("CRTC ID: %u\n", plane->crtc_id);
+    printf("FB ID: %u\n", plane->fb_id);
+    printf("CRTC Position: (%u, %u)\n", plane->crtc_x, plane->crtc_y);
+    printf("Source Position: (%u, %u)\n", plane->x, plane->y);
+    printf("Possible CRTCs: 0x%08x\n", plane->possible_crtcs);
+    printf("Gamma Size: %u\n", plane->gamma_size);
+    printf("Formats count: %u\n", plane->count_formats);
+    for(uint32_t i = 0; i < plane->count_formats; i++){
+        uint32_t fmt = plane->formats[i];
+        printf("  Format[%u]: %c%c%c%c (0x%08x)\n", i,
+               (fmt) & 0xFF, (fmt >> 8) & 0xFF, (fmt >> 16) & 0xFF, (fmt >> 24) & 0xFF, fmt);
+    }
+    printf("=================\n");
+}

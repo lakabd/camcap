@@ -59,6 +59,11 @@ Display::Display(display_config& conf, bool verbose)
 
     // TODO: Add a check if need to be the DRM master: drmSetMaster()
 
+    // Enable atomic modesetting
+    if(drmSetClientCap(m_drmFd, DRM_CLIENT_CAP_ATOMIC, 1) < 0){
+        log.fatal("Enabling atomic modesettings failed !");
+    }
+
     // Create GBM device
     m_gbmDev = gbm_create_device(m_drmFd);
     if(!m_gbmDev){
@@ -196,6 +201,72 @@ bool Display::findCrtc()
     return true;
 }
 
+bool Display::findPlane()
+{
+    Logger& log = m_logger;
+    int crtc_index = -1;
+
+    log.status("Finding a plane...");
+
+    // Planes require a separate get resources call
+    drmModePlaneRes *planeRes = drmModeGetPlaneResources(m_drmFd);
+    if(!planeRes){
+        log.error("drmModeGetPlaneResources: failed to get Plane resources");
+        return false;
+    }
+
+    // Find our CRTC index for possible_crtcs bitmask
+    for(int i = 0; i < m_drmRes->count_crtcs; i++){
+        if(m_drmRes->crtcs[i] == m_crtcId){
+            crtc_index = i;
+            break;
+        }
+    }
+    
+    // Find a primary plane
+    for(uint32_t i = 0; i < planeRes->count_planes; i++){
+        drmModePlane *plane = drmModeGetPlane(m_drmFd, planeRes->planes[i]);
+        if(!plane)
+            continue;
+        
+        // Check if plane is compatible with our CRTC
+        if(plane->possible_crtcs & (1u << crtc_index)){
+            // Check if it's a PRIMARY plane
+            drmModeObjectProperties *props = drmModeObjectGetProperties(m_drmFd, plane->plane_id, DRM_MODE_OBJECT_PLANE);
+            if(props){
+                for(uint32_t j = 0; j < props->count_props; j++){
+                    drmModePropertyRes *prop = drmModeGetProperty(m_drmFd, props->props[j]);
+                    if(prop){
+                        if(strcmp(prop->name, "type") == 0 && props->prop_values[j] == DRM_PLANE_TYPE_PRIMARY){
+                            m_planeId = plane->plane_id;
+                            m_drmPlane = plane;
+                            log.info("Found Primary DRM plane ID : %d", m_planeId);
+                        }
+                        drmModeFreeProperty(prop);
+                    }
+                    if(m_planeId) break;
+                }
+                drmModeFreeObjectProperties(props);
+            }
+        }
+        if(m_planeId) break;
+        drmModeFreePlane(plane);
+    }
+
+    drmModeFreePlaneResources(planeRes);
+
+    if(!m_planeId){
+        log.error("findPlane: No Primary plane found !");
+        return false;
+    }
+
+    if(log.get_verbose()){
+        print_drmModePlane(m_drmPlane);
+    }
+    
+    return true;
+}
+
 bool Display::initialize()
 {
     Logger& log = m_logger;
@@ -221,6 +292,12 @@ bool Display::initialize()
     // Find Crtc
     if(!findCrtc()){
         log.error("findCrtc() failed !");
+        return false;
+    }
+
+    // Find Primary plane
+    if(!findPlane()){
+        log.error("findPlane() failed !");
         return false;
     }
 
@@ -373,6 +450,10 @@ Display::~Display()
     // Free GBM BO
     if(m_bo){
         gbm_bo_destroy(m_bo);
+    }
+    // Free DRM plane
+    if(m_drmPlane){
+        drmModeFreePlane(m_drmPlane);
     }
     // Free DRM crtc
     if(m_drmCrtc){

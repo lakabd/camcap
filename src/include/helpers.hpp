@@ -36,3 +36,4 @@ void print_drmModeRes(drmModeRes *res);
 void print_drmModeConnector(int drmfd, drmModeConnector *conn);
 void print_drmModeEncoder(drmModeEncoder *enc);
 void print_drmModeCrtc(drmModeCrtc *crtc);
+void print_drmModePlane(drmModePlane *plane);
