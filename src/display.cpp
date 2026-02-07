@@ -240,7 +240,7 @@ bool Display::testPatern()
         return false;
     }
 
-   // Map and fill with test pattern
+    // Map and fill with test pattern
     void *map_data;
     uint32_t stride;
     void *ptr = gbm_bo_map(m_bo, 0, 0, m_modeSettings.hdisplay, m_modeSettings.vdisplay, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
@@ -267,18 +267,32 @@ bool Display::testPatern()
 
 bool Display::importGbmBoFromFD()
 {
+    Logger& log = m_logger;
+
+    log.status("Importing external DMA_BUF.");
+
     // Sanity check
-    // Import DMA_BUF
-/*  
-    struct gbm_import_fd_data import_data = {
-        .fd = 0, // TODO
-        .width = 0,
-        .height = 0,
-        .stride = 0, //TODO
-        .format = m_format
-    };
+    if(m_config.buf_fd < 0){
+        log.error("Provided buf_fd is invalid");
+        return false;
+    }
+
+    // Import BO
+    struct gbm_import_fd_data import_data;
+    import_data.fd = m_config.buf_fd;
+    import_data.width = m_config.buf_width;
+    import_data.height = m_config.buf_height;
+    import_data.stride = m_config.buf_stride;
+    import_data.format = m_format;
+    
     m_bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &import_data, m_gbm_flags);
- */
+    if(!m_bo){
+        log.error("gbm_bo_import failed: cannot import DMA_BUF (errno: %d - %s)", errno, strerror(errno));
+        return false;
+    }
+
+    log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", m_config.buf_fd, m_config.buf_width, m_config.buf_height, m_config.buf_stride);
+
     return true;
 }
 
@@ -302,7 +316,7 @@ bool Display::scanout()
     }
     else{
         // Import BO from user conf
-        if(!importGbmBoFromFD()){
+        if(!m_bo && !importGbmBoFromFD()){
             log.error("importGbmBoFromFD() failed!");
             return false;
         }
@@ -356,7 +370,7 @@ Display::~Display()
     if(m_fbId > 0){
         drmModeRmFB(m_drmFd, m_fbId);
     }
-    // Free GBM  BO
+    // Free GBM BO
     if(m_bo){
         gbm_bo_destroy(m_bo);
     }

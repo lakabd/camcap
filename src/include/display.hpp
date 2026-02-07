@@ -33,7 +33,7 @@ struct display_config {
     uint32_t buf_width;
     uint32_t buf_height;
     uint32_t buf_stride;
-    uint32_t buf_fd; // The DMA_BUF file descriptor associated with the buffer.
+    int buf_fd; // The DMA_BUF file descriptor associated with the buffer.
 
     /* Test display.
     * When enabled, above settings are ignored and buf dimensions are set to match display mode & buf_fourcc defaults to XR24.
