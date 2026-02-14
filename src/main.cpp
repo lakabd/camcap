@@ -25,11 +25,12 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <poll.h>
 
 #include "helpers.hpp"
 #include "display.hpp"
 
-#define APP_VERBOSITY true
+#define APP_VERBOSITY false
 
 static std::atomic<bool> running(true);
 
@@ -44,7 +45,7 @@ int main(int argc, char* argv[])
 {
     (void) argc;
     (void) argv;
-    bool ret = false;
+    int ret = 0;
 
     // Setup signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
@@ -61,15 +62,31 @@ int main(int argc, char* argv[])
         return -1;
     }
 
+    // Init Polls
+    struct pollfd fds;
+    fds.fd = disp.get_fd();
+    fds.events = POLLIN; // Wake up when VSync/Flip event happens
+
     // Scanout
     printf("[MAIN] Starting loop (Press Ctrl+C to exit)...\n");
+
     while(running){
-        ret = disp.scanout();
-        if(!ret){
-            printf("[MAIN] Error on display scanout() !\n");
-            return -1;
+        ret = poll(&fds, 1, -1); // Wait indefinitely for an event
+
+        if(ret > 0){
+            if (fds.revents & POLLIN) {
+                if(!disp.handleEvent()){
+                    printf("[MAIN] Error on display handleEvent() !\n");
+                    return -1;
+                }
+            }
+            if(!disp.flipPending()){
+                if(!disp.scanout(0)){
+                    printf("[MAIN] Error on display scanout() !\n");
+                    return -1;
+                }
+            }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }
 
     printf("[MAIN] Exiting...\n");

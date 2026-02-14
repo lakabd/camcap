@@ -28,12 +28,14 @@
 #include <xf86drmMode.h>
 #include "logger.hpp"
 
+// DRM Event callback
+void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *user_data);
+
 struct display_config {
     std::string buf_fourcc;
     uint32_t buf_width;
     uint32_t buf_height;
     uint32_t buf_stride;
-    int buf_fd; // The DMA_BUF file descriptor associated with the buffer.
 
     /* Test display.
     * When enabled, above settings are ignored and buf dimensions are set to match display mode & buf_fourcc defaults to XR24.
@@ -49,32 +51,50 @@ private:
     drmModeEncoder *m_drmEncoder{nullptr};
     drmModeCrtc *m_drmCrtc{nullptr};
     drmModeModeInfo m_modeSettings{}; // Holds display preferred mode
+    uint32_t m_modePropFb_id{0}; // FB_ID DRM Mode property for atomicUpdate().
     drmModePlane *m_drmPlane{nullptr};
     uint32_t m_connectorId{0};
     uint32_t m_crtcId{0};
     uint32_t m_planeId{0};
-    uint32_t m_fbId{0};
 
     struct gbm_device *m_gbmDev{nullptr};
     uint32_t m_gbm_flags{0};
-    struct gbm_bo *m_bo{nullptr};
     uint32_t m_format{0}; // used DRM/GBM format
+    uint32_t m_testPatern_FbId{0};
+    uint32_t m_splashscreen_FbId{0};
+
+    drmEventContext m_drm_evctx{};
+    bool m_flip_pending{false};
     
     display_config& m_config;
     Logger m_logger;
+    bool m_display_initialized{false};
 
     bool getRessources();
     bool findConnector();
     bool findEncoder();
     bool findCrtc();
     bool findPlane();
-    bool importGbmBoFromFD();
-    bool testPatern();
+    struct gbm_bo* importGbmBoFromFD(int buf_fd);
+    uint32_t createFbFromGbmBo(struct gbm_bo *bo);
+    bool createTestPattern();
+    bool loadSplachScreen();
+    bool atomicModeSet();
+    bool atomicUpdate(uint32_t fbId);
 
 public:
     Display(display_config& conf, bool verbose);
     ~Display();
 
-    bool initialize();
-    bool scanout();
+    int get_fd(){
+        return m_drmFd;
+    }
+
+    bool flipPending(){
+        return m_flip_pending;
+    }
+
+    bool initialize(); // Initialize the display
+    bool scanout(int buf_fd); // Scanout buf_fd. Non-blocking call
+    bool handleEvent(); // Handle DRM events e.g., page flip
 };

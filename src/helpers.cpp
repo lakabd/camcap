@@ -338,3 +338,26 @@ void print_drmModePlane(drmModePlane *plane)
     }
     printf("=================\n");
 }
+
+uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type, const char *name)
+{
+    drmModeObjectProperties *props = drmModeObjectGetProperties(fd, object_id, object_type);
+    if(!props)
+        return 0;
+
+    uint32_t prop_id = 0;
+    for(uint32_t i = 0; i < props->count_props; i++){
+        drmModePropertyRes *prop = drmModeGetProperty(fd, props->props[i]);
+        if(prop){
+            if(strcmp(prop->name, name) == 0){
+                prop_id = prop->prop_id;
+                drmModeFreeProperty(prop);
+                break;
+            }
+            drmModeFreeProperty(prop);
+        }
+    }
+    drmModeFreeObjectProperties(props);
+    return prop_id;
+}
+

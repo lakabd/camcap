@@ -206,7 +206,7 @@ bool Display::findPlane()
     Logger& log = m_logger;
     int crtc_index = -1;
 
-    log.status("Finding a plane...");
+    log.status("Finding primary plane...");
 
     // Planes require a separate get resources call
     drmModePlaneRes *planeRes = drmModeGetPlaneResources(m_drmFd);
@@ -267,6 +267,83 @@ bool Display::findPlane()
     return true;
 }
 
+bool Display::atomicModeSet()
+{
+    Logger& log = m_logger;
+    int ret;
+
+    log.status("Setting display mode...");
+
+    // Allocate atomic request
+    drmModeAtomicReq *req = drmModeAtomicAlloc();
+    if(!req){
+        log.error("drmModeAtomicAlloc: Failed to allocate atomic request");
+        return false;
+    }
+
+    // Create a blob for the mode
+    uint32_t blob_id = 0;
+    ret = drmModeCreatePropertyBlob(m_drmFd, &m_modeSettings, sizeof(m_modeSettings), &blob_id);
+    if(ret < 0){
+        std::cerr << "Failed to create mode blob" << std::endl;
+        drmModeAtomicFree(req);
+        return false;
+    }
+
+    // Connector: Link the connector to the crtc
+    uint32_t prop_conn_crtc_id = get_drmModePropertyId(m_drmFd, m_connectorId, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID");
+    drmModeAtomicAddProperty(req, m_connectorId, prop_conn_crtc_id, m_crtcId);
+
+    // CRTC: set the mode and activate
+    uint32_t prop_crtc_mode_id = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "MODE_ID");
+    uint32_t prop_crtc_active  = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "ACTIVE");
+    drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_mode_id, blob_id);
+    drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_active, 1);
+
+    // Plane: attach the splashscreen/testpatern FB to the plane and the plane to the crtc
+    m_modePropFb_id = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "FB_ID");
+    uint32_t prop_plane_crtc_id = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
+    drmModeAtomicAddProperty(req, m_planeId, m_modePropFb_id, ((m_config.use_test_patern) ? m_testPatern_FbId : m_splashscreen_FbId));
+    drmModeAtomicAddProperty(req, m_planeId, prop_plane_crtc_id, m_crtcId);
+
+    // Plane: set source coordinates in 16.16 fixed point format
+    uint32_t prop_src_w = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_W");
+    uint32_t prop_src_h = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_H");
+    uint32_t prop_src_x = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_X");
+    uint32_t prop_src_y = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_Y");
+    drmModeAtomicAddProperty(req, m_planeId, prop_src_w, m_modeSettings.hdisplay << 16);
+    drmModeAtomicAddProperty(req, m_planeId, prop_src_h, m_modeSettings.vdisplay << 16);
+    drmModeAtomicAddProperty(req, m_planeId, prop_src_x, 0);
+    drmModeAtomicAddProperty(req, m_planeId, prop_src_y, 0);
+
+    // Plane: set destination coordinates in integer
+    uint32_t prop_crtc_w = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_W");
+    uint32_t prop_crtc_h = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_H");
+    uint32_t prop_crtc_x = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_X");
+    uint32_t prop_crtc_y = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_Y");
+    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_w, m_modeSettings.hdisplay);
+    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_h, m_modeSettings.vdisplay);
+    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_x, 0);
+    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_y, 0);
+
+    // Setup event context
+    m_drm_evctx.version = 2;
+    m_drm_evctx.page_flip_handler = eventCb;
+    
+    // Commit
+    ret = drmModeAtomicCommit(m_drmFd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+    if(ret < 0){
+        log.error("drmModeAtomicCommit: Atomic commit failed: %s", strerror(errno));
+    } else {
+        log.status("Display is On!");
+    }
+
+    drmModeAtomicFree(req);
+    drmModeDestroyPropertyBlob(m_drmFd, blob_id);
+
+    return true;
+}
+
 bool Display::initialize()
 {
     Logger& log = m_logger;
@@ -301,18 +378,41 @@ bool Display::initialize()
         return false;
     }
 
+    // Load Splashscreen or test patern
+    if(m_config.use_test_patern){
+        if(!createTestPattern()){
+            log.error("createTestPattern() failed!");
+            return false;
+        }
+    }
+    else{
+        if(!loadSplachScreen()){
+            log.error("loadSplachScreen() failed!");
+            return false;
+        }
+    }
+
+    // Display On
+    if(!atomicModeSet()){
+        log.error("atomicModeSet() failed !");
+        return false;
+    }
+
+    m_display_initialized = true;
+
     return true;
 }
 
-bool Display::testPatern()
+bool Display::createTestPattern()
 {
     Logger& log = m_logger;
+    struct gbm_bo *bo{nullptr};
 
-    log.status("Using test patern.");
+    log.status("Using test patern");
     
     // Create a test buffer
-    m_bo = gbm_bo_create(m_gbmDev, m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_format, m_gbm_flags);
-    if(!m_bo){
+    bo = gbm_bo_create(m_gbmDev, m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_format, m_gbm_flags);
+    if(!bo){
         log.error("gbm_bo_create: Failed to create test buffer");
         return false;
     }
@@ -320,119 +420,236 @@ bool Display::testPatern()
     // Map and fill with test pattern
     void *map_data;
     uint32_t stride;
-    void *ptr = gbm_bo_map(m_bo, 0, 0, m_modeSettings.hdisplay, m_modeSettings.vdisplay, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
+    void *ptr = gbm_bo_map(bo, 0, 0, m_modeSettings.hdisplay, m_modeSettings.vdisplay, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
     
     if(ptr){
         // Red screen
         uint32_t *pixels = (uint32_t *)ptr;
         for(uint32_t y = 0; y < m_modeSettings.vdisplay; y++){
             for(uint32_t x = 0; x < m_modeSettings.hdisplay; x++){
-                pixels[y * (stride/4) + x] = 0xFFFF0000; // Red
+                pixels[y * (stride/4) + x] = 0xFFFF0000; // solid Red
             }
         }
-        gbm_bo_unmap(m_bo, map_data);
+        gbm_bo_unmap(bo, map_data);
     }
     else {
         log.error("gbm_bo_map: Failed to map test buffer");
-        gbm_bo_destroy(m_bo);
-        m_bo = nullptr;
+        gbm_bo_destroy(bo);
         return false;
     }
+
+    // Create FB
+    m_testPatern_FbId = createFbFromGbmBo(bo);
+    if(!m_testPatern_FbId){
+        log.error("createFbFromGbmBo: Failed!");
+        gbm_bo_destroy(bo);
+        return false;
+    }
+
+    // The BO is no more needed as we don't intend to modify the buffer afterwards
+    gbm_bo_destroy(bo);
 
     return true;
 }
 
-bool Display::importGbmBoFromFD()
+bool Display::loadSplachScreen()
 {
     Logger& log = m_logger;
+
+    log.status("Loading SplashScreen");
+
+    // TODO
+
+    // Fall back to createTestPattern() for now
+    bool ret = createTestPattern();
+    m_splashscreen_FbId = m_testPatern_FbId;
+    return ret;
+}
+
+uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
+{
+    Logger& log = m_logger;
+    uint32_t fbId{0};
+
+    // Sanity check
+    if(!bo){
+        log.error("createFbFromGbmBo: gbm_bo is NULL");
+        return 0;
+    }
+
+    // This method is working only for single-plane formats (XRGB8888, ARGB8888, etc.). 
+    // TODO: switch to a generic implementation to support MP formats
+    if(m_format != GBM_FORMAT_XRGB8888){
+        log.error("createFbFromGbmBo: Only supporting XR24 for now.");
+        return 0;
+    }
+
+    // Create FB
+    uint32_t handle = gbm_bo_get_handle(bo).u32;
+    uint32_t stride = gbm_bo_get_stride(bo);
+    uint32_t width = gbm_bo_get_width(bo);
+    uint32_t height = gbm_bo_get_height(bo);
+    log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_format, handle, stride);
+
+    uint32_t handles[4] = {handle, 0, 0, 0};
+    uint32_t strides[4] = {stride, 0, 0, 0};
+    uint32_t offsets[4] = {0, 0, 0, 0};
+
+    int ret = drmModeAddFB2(m_drmFd, width, height, m_format, handles, strides, offsets, &fbId, 0);
+    if(ret){
+        log.error("drmModeAddFB2 failed: %d", ret);
+        return 0;
+    }
+    log.info("Created framebuffer: ID %u", fbId);
+
+    return fbId;
+}
+
+struct gbm_bo* Display::importGbmBoFromFD(int buf_fd)
+{
+    Logger& log = m_logger;
+    struct gbm_bo *bo{nullptr};
 
     log.status("Importing external DMA_BUF.");
 
     // Sanity check
-    if(m_config.buf_fd < 0){
+    if(buf_fd < 0){
         log.error("Provided buf_fd is invalid");
-        return false;
+        return nullptr;
     }
 
     // Import BO
     struct gbm_import_fd_data import_data;
-    import_data.fd = m_config.buf_fd;
+    import_data.fd = buf_fd;
     import_data.width = m_config.buf_width;
     import_data.height = m_config.buf_height;
     import_data.stride = m_config.buf_stride;
     import_data.format = m_format;
     
-    m_bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &import_data, m_gbm_flags);
-    if(!m_bo){
-        log.error("gbm_bo_import failed: cannot import DMA_BUF (errno: %d - %s)", errno, strerror(errno));
-        return false;
+    bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &import_data, m_gbm_flags);
+    if(!bo){
+        log.error("gbm_bo_import failed: cannot import DMA_BUF: %s", strerror(errno));
+        return nullptr;
     }
 
-    log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", m_config.buf_fd, m_config.buf_width, m_config.buf_height, m_config.buf_stride);
+    log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", buf_fd, m_config.buf_width, m_config.buf_height, m_config.buf_stride);
+
+    return bo;
+}
+
+void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *user_data)
+{
+    (void) fd;
+    bool *pending = static_cast<bool*>(user_data);
+    // Page flip done
+    *pending = false;
+
+    printf("Flip complete! Frame %u / Time: %u,%u", frame, sec, usec);
+}
+
+bool Display::handleEvent()
+{
+    Logger& log = m_logger;
+
+    int ret = drmHandleEvent(m_drmFd, &m_drm_evctx);
+    if(ret < 0){
+        log.error("drmHandleEvent failed: %s", strerror(errno));
+        return false;
+    }
 
     return true;
 }
 
-bool Display::scanout()
+bool Display::atomicUpdate(uint32_t fbId)
 {
     Logger& log = m_logger;
-    int ret = -1;
+    int ret{0};
 
     // Sanity check
-    if(!m_crtcId || !m_connectorId){
+    if(fbId <= 0){
+        log.error("fbId not defined");
+        return false;
+    }
+    if(m_modePropFb_id <= 0){
+        log.error("m_modePropFb_id is not defined");
+        return false;
+    }
+
+    // Atomic req
+    drmModeAtomicReq *req = drmModeAtomicAlloc();
+    if(!req){
+        log.error("drmModeAtomicAlloc: Failed to allocate atomic request");
+        return false;
+    }
+
+    // Attach new FB
+    drmModeAtomicAddProperty(req, m_planeId, m_modePropFb_id, fbId);
+
+    // DRM_MODE_ATOMIC_NONBLOCK: Returns immediately, doesn't wait for VSYNC
+    // DRM_MODE_PAGE_FLIP_EVENT: Generates a VBLANK event when the flip completes
+    uint32_t flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
+    
+    ret = drmModeAtomicCommit(m_drmFd, req, flags, &m_flip_pending);
+    if(ret < 0){
+        log.error("drmModeAtomicCommit: Atomic commit failed: %s", strerror(errno));
+    }
+
+    drmModeAtomicFree(req);
+
+    return (ret == 0) ? true : false;
+}
+
+bool Display::scanout(int buf_fd)
+{
+    Logger& log = m_logger;
+    struct gbm_bo *bo{nullptr};
+    uint32_t fbId{0};
+    bool& testing = m_config.use_test_patern;
+
+    // Sanity check
+    if(!m_display_initialized){
         log.error("Display not initialized. Call initialize() first!");
         return false;
     }
 
-    // Get test or real BO
-    if(m_config.use_test_patern){
-        if(!m_bo && !testPatern()){ // scanout() is called in a loop, we should create test BO only if none.
-            log.error("testPatern() failed!");
-            return false;
-        }
-    }
-    else{
-        // Import BO from user conf
-        if(!m_bo && !importGbmBoFromFD()){
+    // Get GBM bo from fd
+    if(!testing){
+        bo = importGbmBoFromFD(buf_fd);
+        if(!bo){
             log.error("importGbmBoFromFD() failed!");
             return false;
         }
     }
-
-    // Check if got a BO
-    if(!m_bo){
-        log.error("GBM bo is empty !");
-        return false;
+    
+    // Get fb from GBM bo
+    if(!testing){
+        fbId = createFbFromGbmBo(bo);
+        if(fbId <= 0){
+            log.error("createFbFromGbmBo() failed!");
+            gbm_bo_destroy(bo);
+            return false;
+        }
     }
 
-    // Create & display the Framebuffer
-    if(m_fbId == 0){
-        uint32_t handle = gbm_bo_get_handle(m_bo).u32;
-        uint32_t stride = gbm_bo_get_stride(m_bo);
-        uint32_t width = gbm_bo_get_width(m_bo);
-        uint32_t height = gbm_bo_get_height(m_bo);
-        log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_format, handle, stride);
-
-        // For single-plane formats (XRGB8888, ARGB8888, etc.). TODO: switch to a generic implementation to support MP formats
-        uint32_t handles[4] = {handle, 0, 0, 0};
-        uint32_t strides[4] = {stride, 0, 0, 0};
-        uint32_t offsets[4] = {0, 0, 0, 0};
-
-        ret = drmModeAddFB2(m_drmFd, width, height, m_format, handles, strides, offsets, &m_fbId, 0);
-        if(ret){
-            log.error("drmModeAddFB2 failed: %d", ret);
+    // Page flip
+    if(testing){
+        if(!atomicUpdate(m_testPatern_FbId)){
+            log.error("atomicUpdate() failed!");
             return false;
         }
-        log.info("Created framebuffer: ID %u", m_fbId);
-
-        // Now display it
-        ret = drmModeSetCrtc(m_drmFd, m_crtcId, m_fbId, 0, 0, &m_connectorId, 1, &m_modeSettings);
-        if(ret){
-            log.error("drmModeSetCrtc failed: %d", ret);
-            drmModeRmFB(m_drmFd, m_fbId);
-            m_fbId = 0;
+    }
+    else {
+        if(!atomicUpdate(fbId)){
+            log.error("atomicUpdate() failed!");
+            drmModeRmFB(m_drmFd, fbId);
+            gbm_bo_destroy(bo);
             return false;
         }
+    }
+
+    // Cleanup
+    if(bo){ // TODO: the bo shall not be destroyed. We need to implement triple buffering.
+        gbm_bo_destroy(bo);
     }
 
     return true;
@@ -443,13 +660,13 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
 
-    // Free Framebuffer
-    if(m_fbId > 0){
-        drmModeRmFB(m_drmFd, m_fbId);
+    // Free splash FB
+    if(m_splashscreen_FbId > 0){
+        drmModeRmFB(m_drmFd, m_splashscreen_FbId);
     }
-    // Free GBM BO
-    if(m_bo){
-        gbm_bo_destroy(m_bo);
+    // Free test FB
+    if(m_testPatern_FbId > 0){
+        drmModeRmFB(m_drmFd, m_testPatern_FbId);
     }
     // Free DRM plane
     if(m_drmPlane){
