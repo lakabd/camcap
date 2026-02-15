@@ -40,7 +40,7 @@ struct display_config {
     /* Test display.
     * When enabled, above settings are ignored and buf dimensions are set to match display mode & buf_fourcc defaults to XR24.
     */
-    bool use_test_patern; 
+    bool testing_display; 
 };
 
 class Display {
@@ -59,14 +59,14 @@ private:
 
     struct gbm_device *m_gbmDev{nullptr};
     uint32_t m_gbm_flags{0};
-    uint32_t m_format{0}; // used DRM/GBM format
+    uint32_t m_gbm_format{0};
     uint32_t m_testPatern_FbId{0};
     uint32_t m_splashscreen_FbId{0};
 
     drmEventContext m_drm_evctx{};
     bool m_flip_pending{false};
     
-    display_config& m_config;
+    display_config m_config{};
     Logger m_logger;
     bool m_display_initialized{false};
 

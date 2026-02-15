@@ -34,49 +34,71 @@ Display::Display(display_config& conf, bool verbose)
     Logger& log = m_logger;
 
     // Sanity check
-    if(!conf.use_test_patern){
-        if(conf.buf_fourcc.length() != 4)
-            log.fatal("Display buffer format must be a 4-character string (e.g., 'NV12')");
-        if(conf.buf_width == 0 || conf.buf_height == 0 || conf.buf_stride == 0 || conf.buf_stride < conf.buf_width)
+    if(!m_config.testing_display){
+        if(m_config.buf_fourcc.length() != 4){
+            log.fatal("Display buffer format must be a 4-character string (e.g., XR24, NV12, ...)");
+        }
+        if(m_config.buf_width == 0 || m_config.buf_height == 0 || m_config.buf_stride == 0 || m_config.buf_stride < m_config.buf_width){
             log.fatal("Display buffer dimensions invalid");
-    }
-    else{
-        conf.buf_fourcc = "XR24"; // XRGB8888;
-        // Dislay mode is used for dimensions
-    }
-
-    // Open DRM device
-    const char* drmDevices[] = {"/dev/dri/card0", "/dev/dri/card1", "/dev/dri/renderD128"};
-    for(const char* device : drmDevices){
-        m_drmFd = open(device, O_RDWR);
-        if(m_drmFd >= 0){
-            log.info("Using DRM device: %s", device);
-            break;
         }
     }
-    if(m_drmFd < 0)
-        log.fatal("No DRM device found !");
-
-    // TODO: Add a check if need to be the DRM master: drmSetMaster()
-
-    // Enable atomic modesetting
-    if(drmSetClientCap(m_drmFd, DRM_CLIENT_CAP_ATOMIC, 1) < 0){
-        log.fatal("Enabling atomic modesettings failed !");
+    else{
+        m_config.buf_fourcc = "XR24"; // XRGB8888;
+        // Display mode is used for dimensions
     }
 
-    // Create GBM device
-    m_gbmDev = gbm_create_device(m_drmFd);
-    if(!m_gbmDev){
-        log.fatal("Failed to create GBM device");
-    }
-    log.info("GBM backend: %s", gbm_device_get_backend_name(m_gbmDev));
+    try {
+        // Open DRM device
+        const char* drmDevices[] = {"/dev/dri/card0", "/dev/dri/card1"};
+        for(const char* device : drmDevices){
+            m_drmFd = open(device, O_RDWR | O_CLOEXEC);
+            if(m_drmFd >= 0){
+                // Check if device has resources (connectors, crtcs)
+                if(getRessources() && m_drmRes){
+                    if(m_drmRes->count_connectors > 0 && m_drmRes->count_crtcs > 0){
+                        log.info("Using DRM device: %s", device);
+                        break;
+                    }
+                    drmModeFreeResources(m_drmRes);
+                    m_drmRes = nullptr;
+                }
+                // Not a suitable device, close and try next
+                close(m_drmFd);
+                m_drmFd = -1;
+            }
+        }
+        
+        if(m_drmFd < 0){
+            log.fatal("No suitable DRM device found (must have Connectors and CRTCs)!");
+        }
+        
+        // TODO: Add a check if need to be the DRM master: drmSetMaster()
 
-    // Validate requested format
-    std::string& fourcc = conf.buf_fourcc;
-    m_gbm_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING; // Defaults to display + GPU
-    m_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
-    if(gbm_device_is_format_supported(m_gbmDev, m_format, m_gbm_flags) == 0){
-        log.fatal("Specified format " + fourcc + " is NOT supported");
+        // Enable atomic modesetting
+        if(drmSetClientCap(m_drmFd, DRM_CLIENT_CAP_ATOMIC, 1) < 0){
+            log.fatal("Enabling atomic modesettings failed !");
+        }
+
+        // Create GBM device
+        m_gbmDev = gbm_create_device(m_drmFd);
+        if(!m_gbmDev){
+            log.fatal("Failed to create GBM device");
+        }
+        log.info("GBM backend: %s", gbm_device_get_backend_name(m_gbmDev));
+
+        // Validate GBM format
+        std::string& fourcc = m_config.buf_fourcc;
+        m_gbm_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING; // Defaults to Display + GPU
+        m_gbm_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
+        if(gbm_device_is_format_supported(m_gbmDev, m_gbm_format, m_gbm_flags) == 0){
+            log.fatal("Specified format " + fourcc + " is NOT supported");
+        }
+        
+    } catch (...) {
+        if(m_gbmDev) gbm_device_destroy(m_gbmDev);
+        if(m_drmRes) drmModeFreeResources(m_drmRes);
+        if(m_drmFd >= 0) close(m_drmFd);
+        throw;
     }
 }
 
@@ -303,7 +325,7 @@ bool Display::atomicModeSet()
     // Plane: attach the splashscreen/testpatern FB to the plane and the plane to the crtc
     m_modePropFb_id = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "FB_ID");
     uint32_t prop_plane_crtc_id = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
-    drmModeAtomicAddProperty(req, m_planeId, m_modePropFb_id, ((m_config.use_test_patern) ? m_testPatern_FbId : m_splashscreen_FbId));
+    drmModeAtomicAddProperty(req, m_planeId, m_modePropFb_id, ((m_config.testing_display) ? m_testPatern_FbId : m_splashscreen_FbId));
     drmModeAtomicAddProperty(req, m_planeId, prop_plane_crtc_id, m_crtcId);
 
     // Plane: set source coordinates in 16.16 fixed point format
@@ -348,12 +370,6 @@ bool Display::initialize()
 {
     Logger& log = m_logger;
 
-    // Get DRM ressources
-    if(!getRessources()){
-        log.error("getRessources() failed !");
-        return false;
-    }
-
     // Find connected display
     if(!findConnector()){
         log.error("findConnector() failed !");
@@ -379,7 +395,7 @@ bool Display::initialize()
     }
 
     // Load Splashscreen or test patern
-    if(m_config.use_test_patern){
+    if(m_config.testing_display){
         if(!createTestPattern()){
             log.error("createTestPattern() failed!");
             return false;
@@ -411,7 +427,7 @@ bool Display::createTestPattern()
     log.status("Using test patern");
     
     // Create a test buffer
-    bo = gbm_bo_create(m_gbmDev, m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_format, m_gbm_flags);
+    bo = gbm_bo_create(m_gbmDev, m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_gbm_format, m_gbm_flags);
     if(!bo){
         log.error("gbm_bo_create: Failed to create test buffer");
         return false;
@@ -479,7 +495,7 @@ uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
 
     // This method is working only for single-plane formats (XRGB8888, ARGB8888, etc.). 
     // TODO: switch to a generic implementation to support MP formats
-    if(m_format != GBM_FORMAT_XRGB8888){
+    if(m_gbm_format != GBM_FORMAT_XRGB8888){
         log.error("createFbFromGbmBo: Only supporting XR24 for now.");
         return 0;
     }
@@ -489,13 +505,13 @@ uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
     uint32_t stride = gbm_bo_get_stride(bo);
     uint32_t width = gbm_bo_get_width(bo);
     uint32_t height = gbm_bo_get_height(bo);
-    log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_format, handle, stride);
+    log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_gbm_format, handle, stride);
 
     uint32_t handles[4] = {handle, 0, 0, 0};
     uint32_t strides[4] = {stride, 0, 0, 0};
     uint32_t offsets[4] = {0, 0, 0, 0};
 
-    int ret = drmModeAddFB2(m_drmFd, width, height, m_format, handles, strides, offsets, &fbId, 0);
+    int ret = drmModeAddFB2(m_drmFd, width, height, m_gbm_format, handles, strides, offsets, &fbId, 0);
     if(ret){
         log.error("drmModeAddFB2 failed: %d", ret);
         return 0;
@@ -524,7 +540,7 @@ struct gbm_bo* Display::importGbmBoFromFD(int buf_fd)
     import_data.width = m_config.buf_width;
     import_data.height = m_config.buf_height;
     import_data.stride = m_config.buf_stride;
-    import_data.format = m_format;
+    import_data.format = m_gbm_format;
     
     bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &import_data, m_gbm_flags);
     if(!bo){
@@ -604,7 +620,7 @@ bool Display::scanout(int buf_fd)
     Logger& log = m_logger;
     struct gbm_bo *bo{nullptr};
     uint32_t fbId{0};
-    bool& testing = m_config.use_test_patern;
+    bool& testing = m_config.testing_display;
 
     // Sanity check
     if(!m_display_initialized){

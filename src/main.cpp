@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
 
     // Init display
     display_config conf;
-    conf.use_test_patern = true;
+    conf.testing_display = true;
     Display disp(conf, APP_VERBOSITY);
     
     printf("[MAIN] Initialize display...\n");
