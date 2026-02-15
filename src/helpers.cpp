@@ -333,8 +333,7 @@ void print_drmModePlane(drmModePlane *plane)
     printf("Formats count: %u\n", plane->count_formats);
     for(uint32_t i = 0; i < plane->count_formats; i++){
         uint32_t fmt = plane->formats[i];
-        printf("  Format[%u]: %c%c%c%c (0x%08x)\n", i,
-               (fmt) & 0xFF, (fmt >> 8) & 0xFF, (fmt >> 16) & 0xFF, (fmt >> 24) & 0xFF, fmt);
+        printf("  Format[%u]: %c%c%c%c (0x%08x)\n", i, (fmt) & 0xFF, (fmt >> 8) & 0xFF, (fmt >> 16) & 0xFF, (fmt >> 24) & 0xFF, fmt);
     }
     printf("=================\n");
 }
@@ -361,3 +360,9 @@ uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type,
     return prop_id;
 }
 
+bool validate_user_buffer(const buffer_t& buf) {
+    if (buf.fourcc.length() != 4) return false;
+    if (buf.width == 0 || buf.height == 0) return false;
+    if (buf.stride < buf.width) return false;
+    return true;
+}

@@ -27,20 +27,15 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include "logger.hpp"
+#include "helpers.hpp"
 
 // DRM Event callback
 void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *user_data);
 
 struct display_config {
-    std::string buf_fourcc;
-    uint32_t buf_width;
-    uint32_t buf_height;
-    uint32_t buf_stride;
-
-    /* Test display.
-    * When enabled, above settings are ignored and buf dimensions are set to match display mode & buf_fourcc defaults to XR24.
-    */
-    bool testing_display; 
+    buffer_t cam_buf;
+    buffer_t gpu_buf;
+    bool testing_display; // test dimensions: display mode settings & test format: XR24
 };
 
 class Display {
@@ -52,14 +47,15 @@ private:
     drmModeCrtc *m_drmCrtc{nullptr};
     drmModeModeInfo m_modeSettings{}; // Holds display preferred mode
     uint32_t m_modePropFb_id{0}; // FB_ID DRM Mode property for atomicUpdate().
-    drmModePlane *m_drmPlane{nullptr};
+    drmModePlane *m_drmPrimaryPlane{nullptr};
     uint32_t m_connectorId{0};
     uint32_t m_crtcId{0};
-    uint32_t m_planeId{0};
+    uint32_t m_primaryPlaneId{0};
 
     struct gbm_device *m_gbmDev{nullptr};
     uint32_t m_gbm_flags{0};
-    uint32_t m_gbm_format{0};
+    uint32_t m_gpu_format{0};
+    uint32_t m_cam_format{0};
     uint32_t m_testPatern_FbId{0};
     uint32_t m_splashscreen_FbId{0};
 
@@ -75,12 +71,17 @@ private:
     bool findEncoder();
     bool findCrtc();
     bool findPlane();
-    struct gbm_bo* importGbmBoFromFD(int buf_fd);
-    uint32_t createFbFromGbmBo(struct gbm_bo *bo);
     bool createTestPattern();
     bool loadSplachScreen();
     bool atomicModeSet();
     bool atomicUpdate(uint32_t fbId);
+
+    // Camera buffer
+    uint32_t createFbFromFd(int buf_fd);
+
+    // GPU buffer
+    struct gbm_bo* importGbmBoFromFD(int buf_fd);
+    uint32_t createFbFromGbmBo(struct gbm_bo *bo);
 
 public:
     Display(display_config& conf, bool verbose);

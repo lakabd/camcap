@@ -26,6 +26,17 @@
 #include <linux/videodev2.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include <string>
+
+// Generic buffer type
+typedef struct {
+    std::string fourcc;
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride; // in pixels
+} buffer_t;
+
+bool validate_user_buffer(const buffer_t& buf);
 
 // V4L2
 bool xioctl(int fd, unsigned long req, void *arg);

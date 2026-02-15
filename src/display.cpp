@@ -23,10 +23,11 @@
 #include <iostream>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <drm/drm_fourcc.h>
 
 #include "display.hpp"
-#include "helpers.hpp"
-
 
 Display::Display(display_config& conf, bool verbose)
     : m_config(conf), m_logger("display", verbose)
@@ -35,16 +36,17 @@ Display::Display(display_config& conf, bool verbose)
 
     // Sanity check
     if(!m_config.testing_display){
-        if(m_config.buf_fourcc.length() != 4){
-            log.fatal("Display buffer format must be a 4-character string (e.g., XR24, NV12, ...)");
+        if(!validate_user_buffer(m_config.cam_buf)){
+            log.fatal("User input: Camera buffer size or format invalid !");
         }
-        if(m_config.buf_width == 0 || m_config.buf_height == 0 || m_config.buf_stride == 0 || m_config.buf_stride < m_config.buf_width){
-            log.fatal("Display buffer dimensions invalid");
+        if(!validate_user_buffer(m_config.gpu_buf)){
+            log.fatal("User input: GPU buffer size or format invalid !");
         }
     }
-    else{
-        m_config.buf_fourcc = "XR24"; // XRGB8888;
-        // Display mode is used for dimensions
+    else {
+        // Tests
+        m_config.gpu_buf.fourcc = "XR24";
+        m_config.cam_buf.fourcc = "NV12";
     }
 
     try {
@@ -86,14 +88,18 @@ Display::Display(display_config& conf, bool verbose)
         }
         log.info("GBM backend: %s", gbm_device_get_backend_name(m_gbmDev));
 
-        // Validate GBM format
-        std::string& fourcc = m_config.buf_fourcc;
+        // Validate GPU format
+        std::string& fourcc = m_config.gpu_buf.fourcc;
         m_gbm_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING; // Defaults to Display + GPU
-        m_gbm_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
-        if(gbm_device_is_format_supported(m_gbmDev, m_gbm_format, m_gbm_flags) == 0){
+        m_gpu_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
+        if(gbm_device_is_format_supported(m_gbmDev, m_gpu_format, m_gbm_flags) == 0){
             log.fatal("Specified format " + fourcc + " is NOT supported");
         }
-        
+
+        // Set camera Format
+        fourcc = m_config.cam_buf.fourcc;
+        m_cam_format = fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
+
     } catch (...) {
         if(m_gbmDev) gbm_device_destroy(m_gbmDev);
         if(m_drmRes) drmModeFreeResources(m_drmRes);
@@ -227,6 +233,7 @@ bool Display::findPlane()
 {
     Logger& log = m_logger;
     int crtc_index = -1;
+    bool plane_format_ok = false;
 
     log.status("Finding primary plane...");
 
@@ -260,30 +267,42 @@ bool Display::findPlane()
                     drmModePropertyRes *prop = drmModeGetProperty(m_drmFd, props->props[j]);
                     if(prop){
                         if(strcmp(prop->name, "type") == 0 && props->prop_values[j] == DRM_PLANE_TYPE_PRIMARY){
-                            m_planeId = plane->plane_id;
-                            m_drmPlane = plane;
-                            log.info("Found Primary DRM plane ID : %d", m_planeId);
+                            // Validate primary plan against camera format
+                            for(uint32_t k = 0; k < plane->count_formats; k++){
+                                if(plane->formats[k] == m_cam_format){
+                                    plane_format_ok = true;
+                                    break;
+                                }
+                            }
+                            // Plan found
+                            if(plane_format_ok){
+                                m_primaryPlaneId = plane->plane_id;
+                                m_drmPrimaryPlane = plane;
+                                log.info("Found Primary DRM plane ID : %d", m_primaryPlaneId);
+                            }
                         }
                         drmModeFreeProperty(prop);
                     }
-                    if(m_planeId) break;
+                    // TODO: add lookup for an overlay plane for GPU.
+                    // TODO: validate overlay plane against GPU format.
+                    if(m_primaryPlaneId) break;
                 }
                 drmModeFreeObjectProperties(props);
             }
         }
-        if(m_planeId) break;
+        if(m_primaryPlaneId) break;
         drmModeFreePlane(plane);
     }
 
     drmModeFreePlaneResources(planeRes);
 
-    if(!m_planeId){
+    if(!m_primaryPlaneId){
         log.error("findPlane: No Primary plane found !");
         return false;
     }
 
     if(log.get_verbose()){
-        print_drmModePlane(m_drmPlane);
+        print_drmModePlane(m_drmPrimaryPlane);
     }
     
     return true;
@@ -323,30 +342,30 @@ bool Display::atomicModeSet()
     drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_active, 1);
 
     // Plane: attach the splashscreen/testpatern FB to the plane and the plane to the crtc
-    m_modePropFb_id = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "FB_ID");
-    uint32_t prop_plane_crtc_id = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
-    drmModeAtomicAddProperty(req, m_planeId, m_modePropFb_id, ((m_config.testing_display) ? m_testPatern_FbId : m_splashscreen_FbId));
-    drmModeAtomicAddProperty(req, m_planeId, prop_plane_crtc_id, m_crtcId);
+    m_modePropFb_id = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "FB_ID");
+    uint32_t prop_plane_crtc_id = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, ((m_config.testing_display) ? m_testPatern_FbId : m_splashscreen_FbId));
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_plane_crtc_id, m_crtcId);
 
     // Plane: set source coordinates in 16.16 fixed point format
-    uint32_t prop_src_w = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_W");
-    uint32_t prop_src_h = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_H");
-    uint32_t prop_src_x = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_X");
-    uint32_t prop_src_y = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "SRC_Y");
-    drmModeAtomicAddProperty(req, m_planeId, prop_src_w, m_modeSettings.hdisplay << 16);
-    drmModeAtomicAddProperty(req, m_planeId, prop_src_h, m_modeSettings.vdisplay << 16);
-    drmModeAtomicAddProperty(req, m_planeId, prop_src_x, 0);
-    drmModeAtomicAddProperty(req, m_planeId, prop_src_y, 0);
+    uint32_t prop_src_w = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_W");
+    uint32_t prop_src_h = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_H");
+    uint32_t prop_src_x = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_X");
+    uint32_t prop_src_y = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_Y");
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_w, m_modeSettings.hdisplay << 16);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_h, m_modeSettings.vdisplay << 16);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_x, 0);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_y, 0);
 
     // Plane: set destination coordinates in integer
-    uint32_t prop_crtc_w = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_W");
-    uint32_t prop_crtc_h = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_H");
-    uint32_t prop_crtc_x = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_X");
-    uint32_t prop_crtc_y = get_drmModePropertyId(m_drmFd, m_planeId, DRM_MODE_OBJECT_PLANE, "CRTC_Y");
-    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_w, m_modeSettings.hdisplay);
-    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_h, m_modeSettings.vdisplay);
-    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_x, 0);
-    drmModeAtomicAddProperty(req, m_planeId, prop_crtc_y, 0);
+    uint32_t prop_crtc_w = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_W");
+    uint32_t prop_crtc_h = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_H");
+    uint32_t prop_crtc_x = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_X");
+    uint32_t prop_crtc_y = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_Y");
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_w, m_modeSettings.hdisplay);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_h, m_modeSettings.vdisplay);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_x, 0);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_y, 0);
 
     // Setup event context
     m_drm_evctx.version = 2;
@@ -422,50 +441,77 @@ bool Display::initialize()
 bool Display::createTestPattern()
 {
     Logger& log = m_logger;
-    struct gbm_bo *bo{nullptr};
+    int ret;
+    struct drm_mode_create_dumb creq{};
+    struct drm_mode_map_dumb mreq{};
+    struct drm_gem_close clreq{};
+    uint32_t fbId = 0;
+    void *map = MAP_FAILED;
+    uint32_t *pixels = nullptr;
 
-    log.status("Using test patern");
+    log.status("Using test patern (format : XR24)");
     
-    // Create a test buffer
-    bo = gbm_bo_create(m_gbmDev, m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_gbm_format, m_gbm_flags);
-    if(!bo){
-        log.error("gbm_bo_create: Failed to create test buffer");
-        return false;
-    }
-
-    // Map and fill with test pattern
-    void *map_data;
-    uint32_t stride;
-    void *ptr = gbm_bo_map(bo, 0, 0, m_modeSettings.hdisplay, m_modeSettings.vdisplay, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
-    
-    if(ptr){
-        // Red screen
-        uint32_t *pixels = (uint32_t *)ptr;
-        for(uint32_t y = 0; y < m_modeSettings.vdisplay; y++){
-            for(uint32_t x = 0; x < m_modeSettings.hdisplay; x++){
-                pixels[y * (stride/4) + x] = 0xFFFF0000; // solid Red
-            }
-        }
-        gbm_bo_unmap(bo, map_data);
-    }
-    else {
-        log.error("gbm_bo_map: Failed to map test buffer");
-        gbm_bo_destroy(bo);
+    // Create Dumb Buffer
+    creq.width = m_modeSettings.hdisplay;
+    creq.height = m_modeSettings.vdisplay;
+    creq.bpp = 32; // XRGB8888
+    ret = drmIoctl(m_drmFd, DRM_IOCTL_MODE_CREATE_DUMB, &creq);
+    if(ret < 0){
+        log.error("DRM_IOCTL_MODE_CREATE_DUMB failed: %s", strerror(errno));
         return false;
     }
 
     // Create FB
-    m_testPatern_FbId = createFbFromGbmBo(bo);
-    if(!m_testPatern_FbId){
-        log.error("createFbFromGbmBo: Failed!");
-        gbm_bo_destroy(bo);
-        return false;
+    uint32_t handles[4] = {creq.handle, 0, 0, 0};
+    uint32_t pitches[4] = {creq.pitch, 0, 0, 0};
+    uint32_t offsets[4] = {0, 0, 0, 0};
+
+    ret = drmModeAddFB2(m_drmFd, creq.width, creq.height, DRM_FORMAT_XRGB8888, handles, pitches, offsets, &fbId, 0);
+    if(ret < 0){
+        log.error("drmModeAddFB2 failed: %s", strerror(errno));
+        goto err;
     }
 
-    // The BO is no more needed as we don't intend to modify the buffer afterwards
-    gbm_bo_destroy(bo);
+    // Map
+    mreq.handle = creq.handle;
+    ret = drmIoctl(m_drmFd, DRM_IOCTL_MODE_MAP_DUMB, &mreq);
+    if(ret < 0){
+        log.error("DRM_IOCTL_MODE_MAP_DUMB failed: %s", strerror(errno));
+        goto err;
+    }
+    map = mmap(0, creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, m_drmFd, mreq.offset);
+    if(map == MAP_FAILED){
+        log.error("mmap failed: %s", strerror(errno));
+        goto err;
+    }
+
+    // Fill
+    pixels = (uint32_t *)map;
+    for(uint32_t y = 0; y < creq.height; y++){
+        for(uint32_t x = 0; x < creq.width; x++){
+            // creq.pitch is in bytes
+            pixels[y * (creq.pitch / 4) + x] = 0xFFFF0000; // solid Red
+        }
+    }
+
+    m_testPatern_FbId = fbId; // FB to display
+
+    // Cleanup
+    munmap(map, creq.size);
+    clreq.handle = creq.handle;
+    drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
 
     return true;
+
+err:
+    if(fbId)
+        drmModeRmFB(m_drmFd, fbId);
+    
+    struct drm_mode_destroy_dumb dreq{};
+    dreq.handle = creq.handle;
+    drmIoctl(m_drmFd, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq);
+
+    return false;
 }
 
 bool Display::loadSplachScreen()
@@ -486,6 +532,7 @@ uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
 {
     Logger& log = m_logger;
     uint32_t fbId{0};
+    int ret;
 
     // Sanity check
     if(!bo){
@@ -493,9 +540,8 @@ uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
         return 0;
     }
 
-    // This method is working only for single-plane formats (XRGB8888, ARGB8888, etc.). 
-    // TODO: switch to a generic implementation to support MP formats
-    if(m_gbm_format != GBM_FORMAT_XRGB8888){
+    // We only support XRGB8888 for now
+    if(m_gpu_format != GBM_FORMAT_XRGB8888){
         log.error("createFbFromGbmBo: Only supporting XR24 for now.");
         return 0;
     }
@@ -505,15 +551,13 @@ uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
     uint32_t stride = gbm_bo_get_stride(bo);
     uint32_t width = gbm_bo_get_width(bo);
     uint32_t height = gbm_bo_get_height(bo);
-    log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_gbm_format, handle, stride);
+    uint32_t bpp = gbm_bo_get_bpp(bo);
+    uint32_t depth = bpp - 8; // For XRGB8888
+    log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_gpu_format, handle, stride);
 
-    uint32_t handles[4] = {handle, 0, 0, 0};
-    uint32_t strides[4] = {stride, 0, 0, 0};
-    uint32_t offsets[4] = {0, 0, 0, 0};
-
-    int ret = drmModeAddFB2(m_drmFd, width, height, m_gbm_format, handles, strides, offsets, &fbId, 0);
-    if(ret){
-        log.error("drmModeAddFB2 failed: %d", ret);
+    ret = drmModeAddFB(m_drmFd, width, height, depth, bpp, stride, handle, &fbId);
+    if(ret < 0){
+        log.error("drmModeAddFB failed: %s", strerror(errno));
         return 0;
     }
     log.info("Created framebuffer: ID %u", fbId);
@@ -526,7 +570,7 @@ struct gbm_bo* Display::importGbmBoFromFD(int buf_fd)
     Logger& log = m_logger;
     struct gbm_bo *bo{nullptr};
 
-    log.status("Importing external DMA_BUF.");
+    log.status("Importing GPU buffer.");
 
     // Sanity check
     if(buf_fd < 0){
@@ -535,22 +579,73 @@ struct gbm_bo* Display::importGbmBoFromFD(int buf_fd)
     }
 
     // Import BO
-    struct gbm_import_fd_data import_data;
-    import_data.fd = buf_fd;
-    import_data.width = m_config.buf_width;
-    import_data.height = m_config.buf_height;
-    import_data.stride = m_config.buf_stride;
-    import_data.format = m_gbm_format;
+    struct gbm_import_fd_data idata;
+    idata.fd = buf_fd;
+    idata.width = m_config.gpu_buf.width;
+    idata.height = m_config.gpu_buf.height;
+    idata.stride = m_config.gpu_buf.stride;
+    idata.format = m_gpu_format;
     
-    bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &import_data, m_gbm_flags);
+    bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &idata, m_gbm_flags);
     if(!bo){
         log.error("gbm_bo_import failed: cannot import DMA_BUF: %s", strerror(errno));
         return nullptr;
     }
 
-    log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", buf_fd, m_config.buf_width, m_config.buf_height, m_config.buf_stride);
+    log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", idata.fd, idata.width, idata.height, idata.stride);
 
     return bo;
+}
+
+uint32_t Display::createFbFromFd(int buf_fd)
+{
+    Logger& log = m_logger;
+    int ret = 0;
+    uint32_t fbId = 0;
+
+    log.info("Importing Camera buffer.");
+
+    // Sanity check
+    if(buf_fd < 0){
+        log.error("Provided buf_fd is invalid");
+        return 0;
+    }
+
+    // We support only NV12 for now
+    if(m_cam_format != DRM_FORMAT_NV12){
+        log.error("createFbFromFd: Only supporting NV12 for now.");
+        return 0;
+    }
+
+    // Create GEM handle
+    uint32_t handle;
+    ret = drmPrimeFDToHandle(m_drmFd, buf_fd, &handle);
+    if(ret < 0){
+        log.error("drmPrimeFDToHandle failed: cannot import DMA_BUF: %s", strerror(errno));
+        return 0;
+    }
+
+    // Create FB
+    uint32_t stride = m_config.cam_buf.stride;
+    uint32_t height = m_config.cam_buf.height;
+    uint32_t width = m_config.cam_buf.width;
+
+    uint32_t handles[4] = {handle, handle, 0, 0};
+    uint32_t pitches[4] = {stride, stride, 0, 0};
+    uint32_t offsets[4] = {0, stride*height, 0, 0}; // Here assuming UV is packed directly after Y plane
+
+    ret = drmModeAddFB2(m_drmFd, width, height, m_cam_format, handles, pitches, offsets, &fbId, 0);
+    if(ret < 0){
+        log.error("drmModeAddFB2 failed: %s", strerror(errno));
+        goto cleanup;
+    }
+
+cleanup:
+    struct drm_gem_close clreq{};
+    clreq.handle = handle;
+    drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
+
+    return fbId;
 }
 
 void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *user_data)
@@ -576,14 +671,14 @@ bool Display::handleEvent()
     return true;
 }
 
-bool Display::atomicUpdate(uint32_t fbId)
+bool Display::atomicUpdate(uint32_t cam_fbId) // TODO: add gpu_fbId
 {
     Logger& log = m_logger;
     int ret{0};
 
     // Sanity check
-    if(fbId <= 0){
-        log.error("fbId not defined");
+    if(cam_fbId <= 0){
+        log.error("cam_fbId not defined");
         return false;
     }
     if(m_modePropFb_id <= 0){
@@ -599,7 +694,7 @@ bool Display::atomicUpdate(uint32_t fbId)
     }
 
     // Attach new FB
-    drmModeAtomicAddProperty(req, m_planeId, m_modePropFb_id, fbId);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, cam_fbId);
 
     // DRM_MODE_ATOMIC_NONBLOCK: Returns immediately, doesn't wait for VSYNC
     // DRM_MODE_PAGE_FLIP_EVENT: Generates a VBLANK event when the flip completes
@@ -618,7 +713,6 @@ bool Display::atomicUpdate(uint32_t fbId)
 bool Display::scanout(int buf_fd)
 {
     Logger& log = m_logger;
-    struct gbm_bo *bo{nullptr};
     uint32_t fbId{0};
     bool& testing = m_config.testing_display;
 
@@ -628,21 +722,14 @@ bool Display::scanout(int buf_fd)
         return false;
     }
 
-    // Get GBM bo from fd
+    // Import GPU FB
+    // TODO
+
+    // Import camera FB
     if(!testing){
-        bo = importGbmBoFromFD(buf_fd);
-        if(!bo){
-            log.error("importGbmBoFromFD() failed!");
-            return false;
-        }
-    }
-    
-    // Get fb from GBM bo
-    if(!testing){
-        fbId = createFbFromGbmBo(bo);
-        if(fbId <= 0){
-            log.error("createFbFromGbmBo() failed!");
-            gbm_bo_destroy(bo);
+        fbId = createFbFromFd(buf_fd);
+        if(!fbId){
+            log.error("createFbFromFd() failed!");
             return false;
         }
     }
@@ -658,14 +745,13 @@ bool Display::scanout(int buf_fd)
         if(!atomicUpdate(fbId)){
             log.error("atomicUpdate() failed!");
             drmModeRmFB(m_drmFd, fbId);
-            gbm_bo_destroy(bo);
             return false;
         }
     }
 
     // Cleanup
-    if(bo){ // TODO: the bo shall not be destroyed. We need to implement triple buffering.
-        gbm_bo_destroy(bo);
+    if(fbId){ // TODO: the fbId shall not be removed. We need to implement triple buffering.
+        drmModeRmFB(m_drmFd, fbId);
     }
 
     return true;
@@ -685,8 +771,8 @@ Display::~Display()
         drmModeRmFB(m_drmFd, m_testPatern_FbId);
     }
     // Free DRM plane
-    if(m_drmPlane){
-        drmModeFreePlane(m_drmPlane);
+    if(m_drmPrimaryPlane){
+        drmModeFreePlane(m_drmPrimaryPlane);
     }
     // Free DRM crtc
     if(m_drmCrtc){

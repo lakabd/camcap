@@ -30,7 +30,7 @@
 #include "helpers.hpp"
 #include "display.hpp"
 
-#define APP_VERBOSITY false
+#define APP_VERBOSITY true
 
 static std::atomic<bool> running(true);
 
