@@ -267,14 +267,14 @@ bool Display::findPlane()
                     drmModePropertyRes *prop = drmModeGetProperty(m_drmFd, props->props[j]);
                     if(prop){
                         if(strcmp(prop->name, "type") == 0 && props->prop_values[j] == DRM_PLANE_TYPE_PRIMARY){
-                            // Validate primary plan against camera format
+                            // Validate primary plane against camera format
                             for(uint32_t k = 0; k < plane->count_formats; k++){
                                 if(plane->formats[k] == m_cam_format){
                                     plane_format_ok = true;
                                     break;
                                 }
                             }
-                            // Plan found
+                            // Plane found
                             if(plane_format_ok){
                                 m_primaryPlaneId = plane->plane_id;
                                 m_drmPrimaryPlane = plane;
@@ -372,10 +372,11 @@ bool Display::atomicModeSet()
     m_drm_evctx.page_flip_handler = eventCb;
     
     // Commit
-    ret = drmModeAtomicCommit(m_drmFd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+    ret = drmModeAtomicCommit(m_drmFd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_ALLOW_MODESET, &m_frame);
     if(ret < 0){
         log.error("drmModeAtomicCommit: Atomic commit failed: %s", strerror(errno));
     } else {
+        m_frame.flip_pending = true;
         log.status("Display is On!");
     }
 
@@ -648,14 +649,28 @@ cleanup:
     return fbId;
 }
 
-void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *user_data)
+void eventCb(int fd, unsigned int sequence, unsigned int sec, unsigned int usec, void *user_data)
 {
     (void) fd;
-    bool *pending = static_cast<bool*>(user_data);
-    // Page flip done
-    *pending = false;
+    (void) sequence;
+    frame_info_t *f = static_cast<frame_info_t*>(user_data);
+    float old_t = 0;
+    float curr_t = 0;
+    float refresh_rate = 0;
 
-    printf("Flip complete! Frame %u / Time: %u,%u", frame, sec, usec);
+    // Calculate FPS
+    if(f->count > 0){
+        old_t = (float) f->sec + (float) f->usec * 0.000001f;
+        curr_t = (float) sec + (float) usec * 0.000001f;
+        refresh_rate = (1.0f / (curr_t - old_t));
+        f->sec = sec;
+        f->usec = usec;
+    }
+
+    // Flip complete
+    f->flip_pending = false;
+
+    printf("Flip complete for frame %u @%.02fhz\n", f->count++, refresh_rate);
 }
 
 bool Display::handleEvent()
@@ -700,9 +715,11 @@ bool Display::atomicUpdate(uint32_t cam_fbId) // TODO: add gpu_fbId
     // DRM_MODE_PAGE_FLIP_EVENT: Generates a VBLANK event when the flip completes
     uint32_t flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
     
-    ret = drmModeAtomicCommit(m_drmFd, req, flags, &m_flip_pending);
+    ret = drmModeAtomicCommit(m_drmFd, req, flags, &m_frame);
     if(ret < 0){
         log.error("drmModeAtomicCommit: Atomic commit failed: %s", strerror(errno));
+    } else {
+        m_frame.flip_pending = true;
     }
 
     drmModeAtomicFree(req);

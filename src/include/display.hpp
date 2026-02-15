@@ -38,6 +38,13 @@ struct display_config {
     bool testing_display; // test dimensions: display mode settings & test format: XR24
 };
 
+typedef struct {
+    unsigned int count;
+    unsigned int sec;
+    unsigned int usec;
+    bool flip_pending;
+} frame_info_t;
+
 class Display {
 private:
     int m_drmFd{-1};
@@ -60,7 +67,7 @@ private:
     uint32_t m_splashscreen_FbId{0};
 
     drmEventContext m_drm_evctx{};
-    bool m_flip_pending{false};
+    frame_info_t m_frame{};
     
     display_config m_config{};
     Logger m_logger;
@@ -92,7 +99,7 @@ public:
     }
 
     bool flipPending(){
-        return m_flip_pending;
+        return m_frame.flip_pending;
     }
 
     bool initialize(); // Initialize the display
