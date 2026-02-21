@@ -63,7 +63,7 @@ private:
     uint32_t m_gbm_flags{0};
     uint32_t m_gpu_format{0};
     uint32_t m_cam_format{0};
-    uint32_t m_testPatern_FbId{0};
+    uint32_t m_testPattern_FbId{0};
     uint32_t m_splashscreen_FbId{0};
 
     drmEventContext m_drm_evctx{};

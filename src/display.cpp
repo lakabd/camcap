@@ -374,7 +374,7 @@ bool Display::atomicModeSet()
         log.error("Failed to find Plane properties: FB_ID/CRTC_ID");
         goto err;
     }
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, ((m_config.testing_display) ? m_testPatern_FbId : m_splashscreen_FbId));
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, ((m_config.testing_display) ? m_testPattern_FbId : m_splashscreen_FbId));
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_plane_crtc_id, m_crtcId);
 
     // Plane: set source coordinates in 16.16 fixed point format
@@ -497,7 +497,7 @@ bool Display::createTestPattern()
     void *map = MAP_FAILED;
     uint32_t *pixels = nullptr;
 
-    log.status("Using test patern (format : XR24)");
+    log.status("Using test pattern (format : XR24)");
     
     // Create Dumb Buffer
     creq.width = m_modeSettings.hdisplay;
@@ -542,24 +542,25 @@ bool Display::createTestPattern()
         }
     }
 
-    m_testPatern_FbId = fbId; // FB to display
+    m_testPattern_FbId = fbId; // FB to display
 
-    // Cleanup
+    // Unmap
     munmap(map, creq.size);
-    clreq.handle = creq.handle;
-    drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
 
-    return true;
+    // Ok
+    ret = 0;
+    goto cleanup;
 
 err:
+    ret = -1;
     if(fbId)
         drmModeRmFB(m_drmFd, fbId);
     
-    struct drm_mode_destroy_dumb dreq{};
-    dreq.handle = creq.handle;
-    drmIoctl(m_drmFd, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq);
+cleanup:
+    clreq.handle = creq.handle;
+    drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
 
-    return false;
+    return (ret == 0);
 }
 
 bool Display::loadSplashScreen()
@@ -572,7 +573,7 @@ bool Display::loadSplashScreen()
 
     // Fall back to createTestPattern() for now
     bool ret = createTestPattern();
-    m_splashscreen_FbId = m_testPatern_FbId;
+    m_splashscreen_FbId = m_testPattern_FbId;
     return ret;
 }
 
@@ -800,7 +801,7 @@ bool Display::scanout(int buf_fd)
 
     // Page flip
     if(testing){
-        if(!atomicUpdate(m_testPatern_FbId)){
+        if(!atomicUpdate(m_testPattern_FbId)){
             log.error("atomicUpdate() failed!");
             return false;
         }
@@ -831,8 +832,8 @@ Display::~Display()
         drmModeRmFB(m_drmFd, m_splashscreen_FbId);
     }
     // Free test FB
-    if(m_testPatern_FbId > 0){
-        drmModeRmFB(m_drmFd, m_testPatern_FbId);
+    if(m_testPattern_FbId > 0){
+        drmModeRmFB(m_drmFd, m_testPattern_FbId);
     }
     // Free DRM plane
     if(m_drmPrimaryPlane){
