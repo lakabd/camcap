@@ -577,23 +577,24 @@ bool Display::loadSplashScreen()
     return ret;
 }
 
-uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
+bool Display::createFbFromGbmBo(struct gbm_bo *bo, uint32_t *out_fbId)
 {
     Logger& log = m_logger;
-    uint32_t fbId{0};
     int ret;
 
     // Sanity check
-    if(!bo){
-        log.error("createFbFromGbmBo: gbm_bo is NULL");
-        return 0;
+    if(!bo || !out_fbId){
+        log.error("createFbFromGbmBo: incorrect arguments");
+        return false;
     }
 
     // We only support XRGB8888 for now
     if(m_gpu_format != GBM_FORMAT_XRGB8888){
         log.error("createFbFromGbmBo: Only supporting XR24 for now.");
-        return 0;
+        return false;
     }
+
+    uint8_t XR24_depth = 24;
 
     // Create FB
     uint32_t handle = gbm_bo_get_handle(bo).u32;
@@ -601,49 +602,56 @@ uint32_t Display::createFbFromGbmBo(struct gbm_bo *bo)
     uint32_t width = gbm_bo_get_width(bo);
     uint32_t height = gbm_bo_get_height(bo);
     uint32_t bpp = gbm_bo_get_bpp(bo);
-    uint32_t depth = bpp - 8; // For XRGB8888
+    uint32_t depth = XR24_depth;
     log.info("Creating framebuffer: %ux%u, format: %#x, handle: %u, stride: %u", width, height, m_gpu_format, handle, stride);
 
-    ret = drmModeAddFB(m_drmFd, width, height, depth, bpp, stride, handle, &fbId);
+    ret = drmModeAddFB(m_drmFd, width, height, depth, bpp, stride, handle, out_fbId);
     if(ret < 0){
         log.error("drmModeAddFB failed: %s", strerror(errno));
-        return 0;
+        return false;
     }
-    log.info("Created framebuffer: ID %u", fbId);
+    log.info("Created framebuffer: ID %u", *out_fbId);
 
-    return fbId;
+    return true;
 }
 
-struct gbm_bo* Display::importGbmBoFromFD(int buf_fd)
+bool Display::importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo)
 {
     Logger& log = m_logger;
-    struct gbm_bo *bo{nullptr};
 
     log.status("Importing GPU buffer.");
 
     // Sanity check
-    if(buf_fd < 0){
-        log.error("Provided buf_fd is invalid");
-        return nullptr;
+    if(buf_fd < 0 || !*out_bo){
+        log.error("importGbmBoFromFD: incorrect arguments");
+        return false;
     }
+
+    // We only support XRGB8888 for now
+    if(m_gpu_format != GBM_FORMAT_XRGB8888){
+        log.error("importGbmBoFromFD: Only supporting XR24 for now.");
+        return false;
+    }
+
+    uint8_t XR24_bpp = 4;
 
     // Import BO
     struct gbm_import_fd_data idata;
     idata.fd = buf_fd;
     idata.width = m_config.gpu_buf.width;
     idata.height = m_config.gpu_buf.height;
-    idata.stride = m_config.gpu_buf.stride;
+    idata.stride = m_config.gpu_buf.stride * XR24_bpp;
     idata.format = m_gpu_format;
     
-    bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &idata, m_gbm_flags);
-    if(!bo){
+    *out_bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &idata, m_gbm_flags);
+    if(!out_bo){
         log.error("gbm_bo_import failed: cannot import DMA_BUF: %s", strerror(errno));
-        return nullptr;
+        return false;
     }
 
     log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", idata.fd, idata.width, idata.height, idata.stride);
 
-    return bo;
+    return true;
 }
 
 uint32_t Display::createFbFromFd(int buf_fd)

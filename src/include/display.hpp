@@ -87,8 +87,8 @@ private:
     uint32_t createFbFromFd(int buf_fd);
 
     // GPU buffer
-    struct gbm_bo* importGbmBoFromFD(int buf_fd);
-    uint32_t createFbFromGbmBo(struct gbm_bo *bo);
+    bool importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo);
+    bool createFbFromGbmBo(struct gbm_bo *bo, uint32_t *out_fbId);
 
 public:
     Display(display_config& conf, bool verbose);
