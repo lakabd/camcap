@@ -489,7 +489,7 @@ bool Display::initialize()
 bool Display::createTestPattern()
 {
     Logger& log = m_logger;
-    int ret;
+    int ret = 0;
     struct drm_mode_create_dumb creq{};
     struct drm_mode_map_dumb mreq{};
     struct drm_gem_close clreq{};
@@ -555,7 +555,6 @@ err:
     ret = -1;
     if(fbId)
         drmModeRmFB(m_drmFd, fbId);
-    
 cleanup:
     clreq.handle = creq.handle;
     drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
@@ -654,24 +653,23 @@ bool Display::importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo)
     return true;
 }
 
-uint32_t Display::createFbFromFd(int buf_fd)
+bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
 {
     Logger& log = m_logger;
     int ret = 0;
-    uint32_t fbId = 0;
 
     log.info("Importing Camera buffer.");
 
     // Sanity check
-    if(buf_fd < 0){
-        log.error("Provided buf_fd is invalid");
-        return 0;
+    if(buf_fd < 0 || !out_fbId){
+        log.error("createFbFromFd: incorrect arguments");
+        return false;
     }
 
     // We support only NV12 for now
     if(m_cam_format != DRM_FORMAT_NV12){
         log.error("createFbFromFd: Only supporting NV12 for now.");
-        return 0;
+        return false;
     }
 
     // Create GEM handle
@@ -679,7 +677,7 @@ uint32_t Display::createFbFromFd(int buf_fd)
     ret = drmPrimeFDToHandle(m_drmFd, buf_fd, &handle);
     if(ret < 0){
         log.error("drmPrimeFDToHandle failed: cannot import DMA_BUF: %s", strerror(errno));
-        return 0;
+        return false;
     }
 
     // Create FB
@@ -691,18 +689,22 @@ uint32_t Display::createFbFromFd(int buf_fd)
     uint32_t pitches[4] = {stride, stride, 0, 0};
     uint32_t offsets[4] = {0, stride*height, 0, 0}; // Here assuming UV is packed directly after Y plane
 
-    ret = drmModeAddFB2(m_drmFd, width, height, m_cam_format, handles, pitches, offsets, &fbId, 0);
+    ret = drmModeAddFB2(m_drmFd, width, height, m_cam_format, handles, pitches, offsets, out_fbId, 0);
     if(ret < 0){
         log.error("drmModeAddFB2 failed: %s", strerror(errno));
-        goto cleanup;
+        goto err;
     }
 
+    ret = 0;
+    goto cleanup;
+
+err:
+    ret = -1;
 cleanup:
     struct drm_gem_close clreq{};
     clreq.handle = handle;
     drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
-
-    return fbId;
+    return (ret == 0);
 }
 
 void eventCb(int fd, unsigned int sequence, unsigned int sec, unsigned int usec, void *user_data)
@@ -786,7 +788,7 @@ bool Display::atomicUpdate(uint32_t cam_fbId) // TODO: add gpu_fbId
 bool Display::scanout(int buf_fd)
 {
     Logger& log = m_logger;
-    uint32_t fbId{0};
+    uint32_t fbId = 0;
     bool& testing = m_config.testing_display;
 
     // Sanity check
@@ -800,8 +802,7 @@ bool Display::scanout(int buf_fd)
 
     // Import camera FB
     if(!testing){
-        fbId = createFbFromFd(buf_fd);
-        if(!fbId){
+        if(!createFbFromFd(buf_fd, &fbId)){
             log.error("createFbFromFd() failed!");
             return false;
         }

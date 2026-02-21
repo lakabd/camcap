@@ -84,7 +84,7 @@ private:
     bool atomicUpdate(uint32_t fbId);
 
     // Camera buffer
-    uint32_t createFbFromFd(int buf_fd);
+    bool createFbFromFd(int buf_fd, uint32_t *out_fbId);
 
     // GPU buffer
     bool importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo);
