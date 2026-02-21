@@ -132,11 +132,23 @@ bool Display::findConnector()
     log.status("Finding connector...");
 
     for(int i = 0; i < m_drmRes->count_connectors; i++){
+        bool pmode_found = false;
         m_drmConnector = drmModeGetConnector(m_drmFd, m_drmRes->connectors[i]);
         if(m_drmConnector && m_drmConnector->connection == DRM_MODE_CONNECTED && m_drmConnector->count_modes > 0){
             m_connectorId = m_drmConnector->connector_id;
-            m_modeSettings = m_drmConnector->modes[0]; // Use first (usually preferred) mode
-            log.info("Found connected display: %dx%d @%dHz", m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_modeSettings.vrefresh);
+            for(int j = 0; j < m_drmConnector->count_modes; j++){
+                if(m_drmConnector->modes[j].type & DRM_MODE_TYPE_PREFERRED){
+                    m_modeSettings = m_drmConnector->modes[j];
+                    log.info("Found connected display: %dx%d @%dHz (preferred)", m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_modeSettings.vrefresh);
+                    pmode_found = true;
+                    break;
+                }
+            }
+            if(!pmode_found){
+                m_modeSettings = m_drmConnector->modes[0];
+                log.info("No preferred mode was found. Using first mode: %dx%d @%dHz", m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_modeSettings.vrefresh);
+            }
+            // Ok
             break;
         }
         drmModeFreeConnector(m_drmConnector);
