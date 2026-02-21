@@ -224,6 +224,7 @@ bool Display::findCrtc()
                 m_drmCrtc = drmModeGetCrtc(m_drmFd, m_crtcId);
                 if(m_drmCrtc){
                     log.info("Found compatible CRTC: ID %d", m_drmCrtc->crtc_id);
+                    break;
                 }
             }
         }
