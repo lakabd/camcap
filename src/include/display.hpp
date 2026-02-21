@@ -26,6 +26,7 @@
 #include <drm/drm.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include <map>
 #include "logger.hpp"
 #include "helpers.hpp"
 
@@ -68,6 +69,7 @@ private:
 
     drmEventContext m_drm_evctx{};
     frame_info_t m_frame{};
+    std::map<int, uint32_t> m_fb_map{}; // <key: buffer dma_fd, value: drm framebuffer id>
     
     display_config m_config{};
     Logger m_logger;

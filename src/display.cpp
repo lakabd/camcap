@@ -558,7 +558,6 @@ err:
 cleanup:
     clreq.handle = creq.handle;
     drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
-
     return (ret == 0);
 }
 
@@ -658,8 +657,6 @@ bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
     Logger& log = m_logger;
     int ret = 0;
 
-    log.info("Importing Camera buffer.");
-
     // Sanity check
     if(buf_fd < 0 || !out_fbId){
         log.error("createFbFromFd: incorrect arguments");
@@ -671,6 +668,15 @@ bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
         log.error("createFbFromFd: Only supporting NV12 for now.");
         return false;
     }
+
+    // Check if buf_fd already cached
+    auto it = m_fb_map.find(buf_fd);
+    if(it != m_fb_map.end()){
+        *out_fbId = it->second;
+        return true;
+    }
+
+    log.info("Importing Camera buffer.");
 
     // Create GEM handle
     uint32_t handle;
@@ -694,6 +700,9 @@ bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
         log.error("drmModeAddFB2 failed: %s", strerror(errno));
         goto err;
     }
+
+    // Cache new FB
+    m_fb_map.emplace(buf_fd, *out_fbId);
 
     ret = 0;
     goto cleanup;
@@ -785,10 +794,10 @@ bool Display::atomicUpdate(uint32_t cam_fbId) // TODO: add gpu_fbId
     return (ret == 0) ? true : false;
 }
 
-bool Display::scanout(int buf_fd)
+bool Display::scanout(int cam_buf_fd)
 {
     Logger& log = m_logger;
-    uint32_t fbId = 0;
+    uint32_t cam_fbId = 0; // FB will be cached and removed in destructor
     bool& testing = m_config.testing_display;
 
     // Sanity check
@@ -802,7 +811,7 @@ bool Display::scanout(int buf_fd)
 
     // Import camera FB
     if(!testing){
-        if(!createFbFromFd(buf_fd, &fbId)){
+        if(!createFbFromFd(cam_buf_fd, &cam_fbId)){
             log.error("createFbFromFd() failed!");
             return false;
         }
@@ -816,16 +825,12 @@ bool Display::scanout(int buf_fd)
         }
     }
     else {
-        if(!atomicUpdate(fbId)){
+        if(!atomicUpdate(cam_fbId)){
             log.error("atomicUpdate() failed!");
-            drmModeRmFB(m_drmFd, fbId);
+            drmModeRmFB(m_drmFd, cam_fbId);
+            m_fb_map.erase(cam_buf_fd); // Erase corresponding entry
             return false;
         }
-    }
-
-    // Cleanup
-    if(fbId){ // TODO: the fbId shall not be removed. We need to implement triple buffering.
-        drmModeRmFB(m_drmFd, fbId);
     }
 
     return true;
@@ -836,6 +841,12 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
 
+    // Free used FBs
+    for(const auto& pair : m_fb_map){
+        if(pair.second > 0){
+            drmModeRmFB(m_drmFd, pair.second);
+        }
+    }
     // Free splash FB
     if(m_splashscreen_FbId > 0){
         drmModeRmFB(m_drmFd, m_splashscreen_FbId);
