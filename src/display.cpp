@@ -56,7 +56,7 @@ Display::Display(display_config& conf, bool verbose)
             m_drmFd = open(device, O_RDWR | O_CLOEXEC);
             if(m_drmFd >= 0){
                 // Check if device has resources (connectors, crtcs)
-                if(getRessources() && m_drmRes){
+                if(getResources() && m_drmRes){
                     if(m_drmRes->count_connectors > 0 && m_drmRes->count_crtcs > 0){
                         log.info("Using DRM device: %s", device);
                         break;
@@ -108,14 +108,14 @@ Display::Display(display_config& conf, bool verbose)
     }
 }
 
-bool Display::getRessources()
+bool Display::getResources()
 {
     Logger& log = m_logger;
     log.status("Acquiring card ressources...");
 
     m_drmRes = drmModeGetResources(m_drmFd);
     if(!m_drmRes){
-        log.error("drmModeGetResources: failed to get DRM ressources");
+        log.error("drmModeGetResources: failed to get DRM resources");
         return false;
     }
 

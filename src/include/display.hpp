@@ -73,7 +73,7 @@ private:
     Logger m_logger;
     bool m_display_initialized{false};
 
-    bool getRessources();
+    bool getResources();
     bool findConnector();
     bool findEncoder();
     bool findCrtc();
