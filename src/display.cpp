@@ -433,6 +433,10 @@ bool Display::initialize()
 {
     Logger& log = m_logger;
 
+    // Don't reinit
+    if(m_display_initialized)
+        return true;
+
     // Find connected display
     if(!findConnector()){
         log.error("findConnector() failed !");
@@ -465,8 +469,8 @@ bool Display::initialize()
         }
     }
     else{
-        if(!loadSplachScreen()){
-            log.error("loadSplachScreen() failed!");
+        if(!loadSplashScreen()){
+            log.error("loadSplashScreen() failed!");
             return false;
         }
     }
@@ -558,7 +562,7 @@ err:
     return false;
 }
 
-bool Display::loadSplachScreen()
+bool Display::loadSplashScreen()
 {
     Logger& log = m_logger;
 

@@ -79,7 +79,7 @@ private:
     bool findCrtc();
     bool findPlane();
     bool createTestPattern();
-    bool loadSplachScreen();
+    bool loadSplashScreen();
     bool atomicModeSet();
     bool atomicUpdate(uint32_t fbId);
 
