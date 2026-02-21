@@ -325,6 +325,11 @@ bool Display::atomicModeSet()
 {
     Logger& log = m_logger;
     int ret;
+    uint32_t prop_conn_crtc_id = 0;
+    uint32_t prop_plane_crtc_id = 0;
+    uint32_t prop_crtc_mode_id = 0, prop_crtc_active = 0;
+    uint32_t prop_src_w = 0, prop_src_h = 0, prop_src_x = 0, prop_src_y = 0;
+    uint32_t prop_crtc_w = 0, prop_crtc_h = 0, prop_crtc_x = 0, prop_crtc_y = 0;
 
     log.status("Setting display mode...");
 
@@ -345,36 +350,56 @@ bool Display::atomicModeSet()
     }
 
     // Connector: Link the connector to the crtc
-    uint32_t prop_conn_crtc_id = get_drmModePropertyId(m_drmFd, m_connectorId, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID");
+    prop_conn_crtc_id = get_drmModePropertyId(m_drmFd, m_connectorId, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID");
+    if(!prop_conn_crtc_id){
+        log.error("Failed to find CRTC_ID property on connector");
+        goto err;
+    }
     drmModeAtomicAddProperty(req, m_connectorId, prop_conn_crtc_id, m_crtcId);
 
     // CRTC: set the mode and activate
-    uint32_t prop_crtc_mode_id = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "MODE_ID");
-    uint32_t prop_crtc_active  = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "ACTIVE");
+    prop_crtc_mode_id = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "MODE_ID");
+    prop_crtc_active  = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "ACTIVE");
+    if(!prop_crtc_mode_id || !prop_crtc_active){
+        log.error("Failed to find CRTC properties: MODE_ID/ACTIVE");
+        goto err;
+    }
     drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_mode_id, blob_id);
     drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_active, 1);
 
     // Plane: attach the splashscreen/testpatern FB to the plane and the plane to the crtc
     m_modePropFb_id = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "FB_ID");
-    uint32_t prop_plane_crtc_id = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
+    prop_plane_crtc_id = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
+    if(!m_modePropFb_id || !prop_plane_crtc_id){
+        log.error("Failed to find Plane properties: FB_ID/CRTC_ID");
+        goto err;
+    }
     drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, ((m_config.testing_display) ? m_testPatern_FbId : m_splashscreen_FbId));
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_plane_crtc_id, m_crtcId);
 
     // Plane: set source coordinates in 16.16 fixed point format
-    uint32_t prop_src_w = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_W");
-    uint32_t prop_src_h = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_H");
-    uint32_t prop_src_x = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_X");
-    uint32_t prop_src_y = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_Y");
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_w, m_modeSettings.hdisplay << 16);
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_h, m_modeSettings.vdisplay << 16);
+    prop_src_w = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_W");
+    prop_src_h = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_H");
+    prop_src_x = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_X");
+    prop_src_y = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "SRC_Y");
+    if(!prop_src_w || !prop_src_h || !prop_src_x || !prop_src_y){
+        log.error("Failed to find Plane SRC properties");
+        goto err;
+    }
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_w, ((uint32_t)m_modeSettings.hdisplay) << 16);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_h, ((uint32_t)m_modeSettings.vdisplay) << 16);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_x, 0);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_y, 0);
 
     // Plane: set destination coordinates in integer
-    uint32_t prop_crtc_w = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_W");
-    uint32_t prop_crtc_h = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_H");
-    uint32_t prop_crtc_x = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_X");
-    uint32_t prop_crtc_y = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_Y");
+    prop_crtc_w = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_W");
+    prop_crtc_h = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_H");
+    prop_crtc_x = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_X");
+    prop_crtc_y = get_drmModePropertyId(m_drmFd, m_primaryPlaneId, DRM_MODE_OBJECT_PLANE, "CRTC_Y");
+    if(!prop_crtc_w || !prop_crtc_h || !prop_crtc_x || !prop_crtc_y){
+        log.error("Failed to find Plane CRTC properties");
+        goto err;
+    }
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_w, m_modeSettings.hdisplay);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_h, m_modeSettings.vdisplay);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_x, 0);
@@ -396,7 +421,12 @@ bool Display::atomicModeSet()
     drmModeAtomicFree(req);
     drmModeDestroyPropertyBlob(m_drmFd, blob_id);
 
-    return true;
+    return (ret == 0);
+
+err:
+    drmModeAtomicFree(req);
+    drmModeDestroyPropertyBlob(m_drmFd, blob_id);
+    return false;
 }
 
 bool Display::initialize()
