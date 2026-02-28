@@ -631,14 +631,12 @@ bool Display::importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo)
         return false;
     }
 
-    uint8_t XR24_bpp = 4;
-
     // Import BO
     struct gbm_import_fd_data idata;
     idata.fd = buf_fd;
     idata.width = m_config.gpu_buf.width;
     idata.height = m_config.gpu_buf.height;
-    idata.stride = m_config.gpu_buf.stride * XR24_bpp;
+    idata.stride = m_config.gpu_buf.stride;
     idata.format = m_gpu_format;
     
     *out_bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &idata, m_gbm_flags);

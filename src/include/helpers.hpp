@@ -33,7 +33,7 @@ typedef struct {
     std::string fourcc;
     uint32_t width;
     uint32_t height;
-    uint32_t stride; // in pixels
+    uint32_t stride; // in bytes (pitch)
 } buffer_t;
 
 bool validate_user_buffer(const buffer_t& buf);
