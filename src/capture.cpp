@@ -138,7 +138,7 @@ bool Capture::enumerateFormats(std::vector<std::string>& list)
     
     // Check if smth was found
     if(list.empty()){
-        log.error("Error VIDIOC_ENUM_FM: No format found for device");
+        log.error("Error VIDIOC_ENUM_FMT: No format found for device");
         return false;
     }
     
@@ -156,6 +156,8 @@ bool Capture::checkFormatSize()
     unsigned int w = m_config.buf.width;
     unsigned int h = m_config.buf.height;
     struct v4l2_frmsizeenum frmsize{};
+    __u32 min_w, min_h, max_w, max_h, step_w, step_h;
+    min_w = min_h = max_w = max_h = step_w = step_h = 0;
 
      __u32 v4l2_fmt = v4l2_fourcc(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
     frmsize.pixel_format = v4l2_fmt;
@@ -164,11 +166,18 @@ bool Capture::checkFormatSize()
     log.info("Enumerating frame sizes for requested format: %s", 
         fourcc.c_str());
     
-    while(ioctl(m_fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) == 0){
+    while(ioctl(m_fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) == 0 || !requested_size_ok){
         found_sizes = true;
+        min_w = frmsize.stepwise.min_width;
+        min_h = frmsize.stepwise.min_height;
+        max_w = frmsize.stepwise.max_width;
+        max_h = frmsize.stepwise.max_height;
+        step_w = frmsize.stepwise.step_width;
+        step_h = frmsize.stepwise.step_height;
+
         if(frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE){
             // Discrete frame sizes
-            log.info("  [%d] Discrete sizeq: %dx%d",
+            log.info("  [%d] Discrete sizes: %dx%d",
                 frmsize.index,
                 frmsize.discrete.width,
                 frmsize.discrete.height);
@@ -179,11 +188,11 @@ bool Capture::checkFormatSize()
         else if(frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE){
             // Stepwise frame sizes
             log.info("  [%d] Stepwise (range with step):", frmsize.index);
-            log.info("      Width:  %d - %d (step %d)", frmsize.stepwise.min_width,  frmsize.stepwise.max_width,  frmsize.stepwise.step_width);
-            log.info("      Height: %d - %d (step %d)", frmsize.stepwise.min_height, frmsize.stepwise.max_height, frmsize.stepwise.step_height);
+            log.info("      Width:  %d - %d (step %d)", min_w,  max_w,  step_w);
+            log.info("      Height: %d - %d (step %d)", min_h, max_h, step_h);
             // Size must fit within stepwise range and steps
-            bool width_ok =  (w >= frmsize.stepwise.min_width  && w <= frmsize.stepwise.max_width  && w % frmsize.stepwise.step_width  == 0);
-            bool height_ok = (h >= frmsize.stepwise.min_height && h <= frmsize.stepwise.max_height && h % frmsize.stepwise.step_height == 0);
+            bool width_ok =  ((w >= min_w)  && (w <= max_w)  && ((w - min_w) % step_w  == 0));
+            bool height_ok = ((h >= min_h) && (h <= max_h) && ((h - min_h) % step_h == 0));
             
             if(width_ok && height_ok)
                 requested_size_ok = true;
@@ -191,10 +200,10 @@ bool Capture::checkFormatSize()
         else if(frmsize.type == V4L2_FRMSIZE_TYPE_CONTINUOUS){
             // Continuous frame sizes
             log.info("  [%d] Continuous (any size in range):", frmsize.index);
-            log.info("      Width:  %d - %d", frmsize.stepwise.min_width,  frmsize.stepwise.max_width);
-            log.info("      Height: %d - %d", frmsize.stepwise.min_height, frmsize.stepwise.max_height);
+            log.info("      Width:  %d - %d", min_w,  max_w);
+            log.info("      Height: %d - %d", min_h, max_h);
             // Size must fit within continuous range
-            if(w >= frmsize.stepwise.min_width && w <= frmsize.stepwise.max_width && h >= frmsize.stepwise.min_height && h <= frmsize.stepwise.max_height)
+            if(w >= min_w && w <= max_w && h >= min_h && h <= max_h)
                 requested_size_ok = true;
         }
 
