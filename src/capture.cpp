@@ -76,19 +76,31 @@ bool Capture::checkDeviceCapabilities()
     log.info("Driver Name: %s", caps.driver);
     log.info("Device Bus: %s", (const char*)caps.bus_info);
     log.info("Device Version: %u", (unsigned int)caps.version);
+
+    // Use device_caps if available 
+    __u32 device_caps = caps.capabilities;
+    if(caps.capabilities & V4L2_CAP_DEVICE_CAPS){
+        device_caps = caps.device_caps;
+    }
+
     log.info("Device Caps:");
     if(log.get_verbose())
-        print_v4l2_device_caps(caps.capabilities);
+        print_v4l2_device_caps(device_caps);
 
     // Check device type
     log.status("Checking device type.");
-    if(!(caps.capabilities & V4L2_CAP_STREAMING)){
+    if(!(device_caps & V4L2_CAP_STREAMING)){
         log.error("Device %s does not support streaming. Please check the specified device !", caps.card);
         return false;
     }
-    if(caps.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE){
+    if(device_caps & V4L2_CAP_VIDEO_CAPTURE_MPLANE){
         log.info("Device is a multi-planar video capture device");
         m_is_mp_device = true;
+    }
+    else if(device_caps & V4L2_CAP_VIDEO_CAPTURE){
+        // TODO: add support for single planar
+        log.error("Device %s is a single plane capture device. Only MPLANE devices are supported.", caps.card);
+        return false;
     }
 
     return true;
