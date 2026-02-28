@@ -30,7 +30,6 @@
 #include <vector>
 #include <fstream>
 
-#include "helpers.hpp"
 #include "capture.hpp"
 
 Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
@@ -52,15 +51,15 @@ Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
         log.fatal("Failed to open device " + device + ": " + strerror(errno));
     
     // Check config
-    if(conf.width == 0 || conf.height == 0 || conf.mem_type >= MEM_TYPE_MAX || conf.buf_count == 0)
-        log.fatal("Capture config not correctly defined. Please check!");
+    if(!validate_user_buffer(m_config.buf)){
+        log.fatal("Capture buffer size or format not correctly defined. Please check!");
+    }
+    if(m_config.mem_type >= MEM_TYPE_MAX || m_config.buf_count == 0)
+        log.fatal("Capture mem_type or buf_count not correctly defined. Please check!");
     
-    if(conf.fmt_fourcc.length() != 4)
-        log.fatal("Format must be a 4-character string (e.g., 'NV12')");
-
     // Init members
     try{
-        m_capture_buf.resize(conf.buf_count);
+        m_capture_buf.resize(m_config.buf_count);
     } catch(const std::bad_alloc& e){
         log.fatal("Failed to allocate capture buffers");
     }
@@ -147,9 +146,9 @@ bool Capture::checkFormatSize()
     Logger& log = m_logger;
     bool found_sizes = false;
     bool requested_size_ok = false;
-    std::string& fourcc = m_config.fmt_fourcc;
-    unsigned int w = m_config.width;
-    unsigned int h = m_config.height;
+    std::string& fourcc = m_config.buf.fourcc;
+    unsigned int w = m_config.buf.width;
+    unsigned int h = m_config.buf.height;
     struct v4l2_frmsizeenum frmsize{};
 
      __u32 v4l2_fmt = v4l2_fourcc(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
@@ -217,7 +216,7 @@ bool Capture::checkFormat()
     Logger& log = m_logger;
     std::vector<std::string> formats_list;
     bool format_found = false;
-    std::string& fourcc = m_config.fmt_fourcc;
+    std::string& fourcc = m_config.buf.fourcc;
 
     log.status("Checking supported formats");
 
@@ -249,7 +248,7 @@ bool Capture::checkFormat()
 bool Capture::setFormat()
 {
     Logger& log = m_logger;
-    std::string& fourcc = m_config.fmt_fourcc;
+    std::string& fourcc = m_config.buf.fourcc;
     struct v4l2_format format{};
     
     log.status("Setting requested format");
@@ -260,8 +259,8 @@ bool Capture::setFormat()
 
     if(m_is_mp_device){
         format.fmt.pix_mp.pixelformat = v4l2_fmt;
-        format.fmt.pix_mp.width = m_config.width;
-        format.fmt.pix_mp.height = m_config.height;
+        format.fmt.pix_mp.width = m_config.buf.width;
+        format.fmt.pix_mp.height = m_config.buf.height;
     } else {
         log.error("TODO: Capture class doesn't support Non-Planar devices");
         return false;
@@ -280,9 +279,9 @@ bool Capture::setFormat()
                 (format.fmt.pix_mp.pixelformat >> 16) & 0xFF,
                 (format.fmt.pix_mp.pixelformat >> 24) & 0xFF);
         }
-        if(format.fmt.pix_mp.width != m_config.width || 
-           format.fmt.pix_mp.height != m_config.height){
-            log.warning("Driver adjusted resolution from %dx%d to %dx%d", m_config.width, m_config.height, format.fmt.pix_mp.width, format.fmt.pix_mp.height);
+        if(format.fmt.pix_mp.width != m_config.buf.width || 
+           format.fmt.pix_mp.height != m_config.buf.height){
+            log.warning("Driver adjusted resolution from %dx%d to %dx%d", m_config.buf.width, m_config.buf.height, format.fmt.pix_mp.width, format.fmt.pix_mp.height);
         }
         log.info("Format set: %dx%d, num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.num_planes);
     }

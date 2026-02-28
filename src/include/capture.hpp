@@ -26,6 +26,8 @@
 #include <linux/videodev2.h>
 #include "logger.hpp"
 
+#include "helpers.hpp"
+
 struct capture_buf {
     void* plane_addr[VIDEO_MAX_PLANES];
     size_t plane_size[VIDEO_MAX_PLANES];
@@ -38,10 +40,7 @@ typedef enum {
 } mem_type_t;
 
 struct capture_config {
-    std::string fmt_fourcc;
-    __u32 width;
-    __u32 height;
-
+    buffer_t buf;
     mem_type_t mem_type;
     __u32 buf_count;
 };
@@ -51,7 +50,7 @@ private:
     int m_fd{-1};
     std::vector<capture_buf> m_capture_buf;
     struct v4l2_buffer m_v4l2_buf{};
-    capture_config& m_config;
+    capture_config m_config;
     bool m_is_mp_device{false};
     Logger m_logger;
 

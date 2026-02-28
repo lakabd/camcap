@@ -29,8 +29,11 @@
 
 #include "helpers.hpp"
 #include "display.hpp"
+#include "capture.hpp"
 
 #define APP_VERBOSITY true
+
+#define ISP_MAINPATH    "/dev/video11"
 
 static std::atomic<bool> running(true);
 
@@ -50,10 +53,19 @@ int main(int argc, char* argv[])
     // Setup signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
 
+    // Init capture
+    capture_config cam_conf;
+    cam_conf.buf.fourcc = "NV12";
+    cam_conf.buf.width = 1920;
+    cam_conf.buf.height = 1080;
+    cam_conf.buf.stride = 1920;
+    cam_conf.mem_type = TYPE_MMAP;
+    cam_conf.buf_count = 5;
+
     // Init display
-    display_config conf;
-    conf.testing_display = true;
-    Display disp(conf, APP_VERBOSITY);
+    display_config disp_conf;
+    disp_conf.testing_display = true;
+    Display disp(disp_conf, APP_VERBOSITY);
     
     printf("[MAIN] Initialize display...\n");
     ret = disp.initialize();
