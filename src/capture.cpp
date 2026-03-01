@@ -51,8 +51,6 @@ Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
         if(m_config.mem_type >= MEM_TYPE_MAX || m_config.buf_count == 0)
             log.fatal("Capture mem_type or buf_count not correctly defined. Please check!");
         
-        // Init members
-        m_capture_buf.resize(m_config.buf_count);
     } catch (...) {
         close(m_fd);
         throw;
@@ -336,14 +334,15 @@ bool Capture::requestBuffers()
     // Verify
     if(req.count != m_config.buf_count){
         log.warning("Driver adjusted buffer count from %d to %d", m_config.buf_count, req.count); 
-        m_config.buf_count = req.count;
+    }
 
-        try{
-            m_capture_buf.resize(req.count);
-        } catch(const std::bad_alloc& e) {
-            log.error("Failed to resize capture buffer vector");
-            return false;
-        }
+    // Update config
+    m_config.buf_count = req.count;
+    try {
+        m_capture_buf.resize(m_config.buf_count);
+    } catch(const std::bad_alloc& e) {
+        log.error("Failed to allocate memory for %d capture buffers: %s", m_config.buf_count, e.what());
+        return false;
     }
     
     log.info("Allocated %d buffers", req.count);
