@@ -59,7 +59,6 @@ int main(int argc, char* argv[])
     cam_conf.buf.width = 1920;
     cam_conf.buf.height = 1080;
     cam_conf.buf.stride = 1920;
-    cam_conf.mem_type = TYPE_MMAP;
     cam_conf.buf_count = 5;
 
     // Init display

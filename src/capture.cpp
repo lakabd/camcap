@@ -48,9 +48,12 @@ Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
         if(!validate_user_buffer(m_config.buf)){
             log.fatal("Capture buffer size or format not correctly defined. Please check!");
         }
-        if(m_config.mem_type >= MEM_TYPE_MAX || m_config.buf_count == 0)
-            log.fatal("Capture mem_type or buf_count not correctly defined. Please check!");
-        
+        if(m_config.buf_count == 0)
+            log.fatal("Capture buf_count not correctly defined. Please check!");
+
+        // Init members
+        m_memory_type = V4L2_MEMORY_MMAP; // Only MMAP for now
+
     } catch (...) {
         close(m_fd);
         throw;
@@ -325,7 +328,7 @@ bool Capture::requestBuffers()
     // Request buffers
     req.count  = m_config.buf_count;
     req.type   = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    req.memory = m_memory_type;
     if(!xioctl(m_fd, VIDIOC_REQBUFS, &req)){
         log.error("VIDIOC_REQBUFS failed, error requesting buffers");
         return false;
@@ -350,25 +353,54 @@ bool Capture::requestBuffers()
     return true;
 }
 
-bool Capture::mapBuffers()
+bool Capture::prepareBuffers()
 {
     Logger& log = m_logger;
     struct v4l2_buffer buf{};
     struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
+    struct v4l2_exportbuffer expbuf{};
     
-    log.status("Mapping capture buffers: Using %s", (m_config.mem_type == TYPE_DMABUF) ? "DMABUF" : "MMAP" );
+    log.status("Preparing capture buffers");
+
+    // Fill v4l2_exportbuffer
+    expbuf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    expbuf.flags = O_CLOEXEC | O_RDONLY;
     
     // Fill v4l2_buffer struct
-    buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    buf.type = expbuf.type;
+    buf.memory = m_memory_type;
     if(m_is_mp_device){
         buf.m.planes = planes;
         buf.length   = VIDEO_MAX_PLANES;
+    } else {
+        log.error("TODO: Capture class doesn't support Non-Planar devices");
+        return false;
     }
+
+    // Cleanup lambda
+    auto cleanup = [&](unsigned int num_bufs){          
+        for(unsigned int j = 0; j <= num_bufs; j++){
+            for(unsigned int k = 0; k < VIDEO_MAX_PLANES; k++){
+                // Unmap previously mapped buffers
+                if(m_capture_buf[j].plane_addr[k] != nullptr){
+                    munmap(m_capture_buf[j].plane_addr[k], m_capture_buf[j].plane_size[k]);
+                    m_capture_buf[j].plane_addr[k] = nullptr;
+                    m_capture_buf[j].plane_size[k] = 0;
+                }
+                // Close previously exported buffers
+                if(m_capture_buf[j].plane_fd[k] >= 0){
+                    close(m_capture_buf[j].plane_fd[k]);
+                    m_capture_buf[j].plane_fd[k] = -1;
+                }
+            }
+        }
+    };
 
     // Query and map each requested buffer
     for(unsigned int i = 0; i < m_config.buf_count; i++){
         buf.index  = i;
+        expbuf.index = i;
+        buf.length = VIDEO_MAX_PLANES;
         
         // Query buffer to get plane information
         if(!xioctl(m_fd, VIDIOC_QUERYBUF, &buf)){
@@ -376,37 +408,33 @@ bool Capture::mapBuffers()
             return false;
         }
         
-        // Map buffer planes
-        if(m_is_mp_device){
-            log.info(". Buffer %d: (%d plane(s))", i, buf.length);
-            
-            for(unsigned int p = 0; p < buf.length; p++){
-                void* mapped = mmap(NULL, planes[p].length, PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, planes[p].m.mem_offset);
-                if(mapped == MAP_FAILED){
-                    log.error("mmap failed for buffer %d plane %d: %s", i, p, strerror(errno));
-                    // Unmap previously mapped buffers
-                    for(unsigned int j = 0; j <= i; j++){
-                        for(unsigned int k = 0; k < buf.length; k++){
-                            if(m_capture_buf[j].plane_addr[k] != nullptr){
-                                munmap(m_capture_buf[j].plane_addr[k], m_capture_buf[j].plane_size[k]);
-                            }
-                        }
-                    }
-                    return false;
-                }
-                // Save addr and size
-                m_capture_buf[i].plane_addr[p] = mapped;
-                m_capture_buf[i].plane_size[p] = planes[p].length;
-                
-                log.info("    Plane %d: addr=%p, size=%u bytes, offset=%u", p, mapped, planes[p].length, planes[p].m.mem_offset);
+        log.info(". Buffer %d: (%d plane(s))", i, buf.length);
+        // For every plane
+        for(unsigned int p = 0; p < buf.length; p++){
+            // Map
+            void* mapped = mmap(NULL, planes[p].length, PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, planes[p].m.mem_offset);
+            if(mapped == MAP_FAILED){
+                log.error("mmap failed for buffer %d plane %d", i, p);
+                cleanup(i);
+                return false;
             }
-        } else {
-            log.error("TODO: Capture class doesn't support Non-Planar devices");
-            return false;
+            m_capture_buf[i].plane_addr[p] = mapped;
+            m_capture_buf[i].plane_size[p] = planes[p].length;
+
+            // Export
+            expbuf.plane = p;
+            if (!xioctl(m_fd, VIDIOC_EXPBUF, &expbuf)) {
+                log.error("export failed for buffer %d plane %d", i, p);
+                cleanup(i);
+                return false;
+            }
+            m_capture_buf[i].plane_fd[p] = expbuf.fd;
+            
+            log.info("    Plane %d: addr=%p, size=%u bytes, offset=%u, DMA fd=%d", p, mapped, planes[p].length, planes[p].m.mem_offset, expbuf.fd);
         }
     }
     
-    log.info("Successfully mapped %d buffers", m_config.buf_count);
+    log.info("%d buffers ready for capture", m_config.buf_count);
 
     return true;
 }
@@ -420,7 +448,7 @@ bool Capture::queueBuffers()
     log.status("Queuing capture buffers");
     // Fill v4l2_buffer struct
     buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    buf.memory = m_memory_type;
     
     if(m_is_mp_device){
         buf.m.planes = planes;
@@ -487,9 +515,9 @@ bool Capture::start()
         return false;
     }
 
-    // Map capture buffers
-    if(!mapBuffers()){
-        log.error("Capture::mapBuffers Failed !");
+    // Map & Export buffers
+    if(!prepareBuffers()){
+        log.error("Capture::prepareBuffers Failed !");
         return false;
     }
 
@@ -526,7 +554,7 @@ bool Capture::saveOneFrame(const std::string& path)
 
     // Prepare v4l2_buffer struct
     buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = (m_config.mem_type == TYPE_DMABUF) ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
+    buf.memory = m_memory_type;
     
     if(m_is_mp_device){
         buf.m.planes = planes;
@@ -623,6 +651,10 @@ Capture::~Capture()
             if(m_capture_buf[i].plane_addr[p] != nullptr){
                 munmap(m_capture_buf[i].plane_addr[p], m_capture_buf[i].plane_size[p]);
                 m_capture_buf[i].plane_addr[p] = nullptr;
+            }
+            if(m_capture_buf[i].plane_fd[p] >= 0){
+                close(m_capture_buf[i].plane_fd[p]);
+                m_capture_buf[i].plane_fd[p] = -1;
             }
         }
     }

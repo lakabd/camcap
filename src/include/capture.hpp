@@ -29,19 +29,21 @@
 #include "helpers.hpp"
 
 struct capture_buf {
+    int plane_fd[VIDEO_MAX_PLANES]; // For DMA_BUF
     void* plane_addr[VIDEO_MAX_PLANES];
     size_t plane_size[VIDEO_MAX_PLANES];
-};
 
-typedef enum {
-    TYPE_MMAP=0,
-    TYPE_DMABUF,
-    MEM_TYPE_MAX
-} mem_type_t;
+    capture_buf(){
+        for(int i = 0; i < VIDEO_MAX_PLANES; i++){
+            plane_fd[i] = -1;
+            plane_addr[i] = nullptr;
+            plane_size[i] = 0;
+        }
+    }
+};
 
 struct capture_config {
     buffer_t buf;
-    mem_type_t mem_type;
     __u32 buf_count;
 };
 
@@ -50,7 +52,8 @@ private:
     int m_fd{-1};
     std::vector<capture_buf> m_capture_buf;
     struct v4l2_buffer m_v4l2_buf{};
-    capture_config m_config;
+    capture_config m_config{};
+    __u32 m_memory_type{};
     bool m_is_mp_device{false};
     Logger m_logger;
 
@@ -65,7 +68,7 @@ private:
 
     // Buffers
     bool requestBuffers();
-    bool mapBuffers();
+    bool prepareBuffers();
     bool queueBuffers();
     bool dequeueBuffers();
 
