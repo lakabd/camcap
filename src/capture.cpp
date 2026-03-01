@@ -288,16 +288,29 @@ bool Capture::setFormat()
 
     // Verify
     if(m_is_mp_device){
+        // Format changed
         if(format.fmt.pix_mp.pixelformat != v4l2_fmt){
-            log.warning("Driver adjusted pixel format from %s to %c%c%c%c", fourcc.c_str(), format.fmt.pix_mp.pixelformat & 0xFF,
-                (format.fmt.pix_mp.pixelformat >> 8) & 0xFF,
-                (format.fmt.pix_mp.pixelformat >> 16) & 0xFF,
-                (format.fmt.pix_mp.pixelformat >> 24) & 0xFF);
+            std::string new_fourcc = {
+                static_cast<char>(format.fmt.pix_mp.pixelformat & 0xFF),
+                static_cast<char>((format.fmt.pix_mp.pixelformat >> 8) & 0xFF),
+                static_cast<char>((format.fmt.pix_mp.pixelformat >> 16) & 0xFF),
+                static_cast<char>((format.fmt.pix_mp.pixelformat >> 24) & 0xFF)
+            };
+            log.warning("Driver adjusted pixel format from %s to %s", fourcc.c_str(), new_fourcc.c_str());
+            m_config.buf.fourcc = new_fourcc;
         }
+        // Size changed
         if(format.fmt.pix_mp.width != m_config.buf.width || 
-           format.fmt.pix_mp.height != m_config.buf.height){
-            log.warning("Driver adjusted resolution from %dx%d to %dx%d", m_config.buf.width, m_config.buf.height, format.fmt.pix_mp.width, format.fmt.pix_mp.height);
+            format.fmt.pix_mp.height != m_config.buf.height || 
+            format.fmt.pix_mp.plane_fmt[0].bytesperline != m_config.buf.stride) // TODO: This is ugly, we need to check num_planes not just plane 0
+        {
+            log.warning("Driver adjusted resolution from %dx%d (s:%d bytes) to %dx%d (s:%d bytes)", m_config.buf.width, m_config.buf.height, m_config.buf.stride,
+                format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.plane_fmt[0].bytesperline);
+            m_config.buf.width = format.fmt.pix_mp.width;
+            m_config.buf.height = format.fmt.pix_mp.height;
+            m_config.buf.stride = format.fmt.pix_mp.plane_fmt[0].bytesperline;
         }
+        
         log.info("Format set: %dx%d, num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.num_planes);
     }
 
