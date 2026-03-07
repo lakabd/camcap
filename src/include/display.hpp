@@ -73,7 +73,7 @@ private:
     
     display_config m_config{};
     Logger m_logger;
-    bool m_display_initialized{false};
+    bool m_initialized{false};
 
     bool getResources();
     bool findConnector();

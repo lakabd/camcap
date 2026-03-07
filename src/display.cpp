@@ -434,7 +434,7 @@ bool Display::initialize()
     Logger& log = m_logger;
 
     // Don't reinit
-    if(m_display_initialized)
+    if(m_initialized)
         return true;
 
     // Find connected display
@@ -481,7 +481,7 @@ bool Display::initialize()
         return false;
     }
 
-    m_display_initialized = true;
+    m_initialized = true;
 
     return true;
 }
@@ -799,7 +799,7 @@ bool Display::scanout(int cam_buf_fd)
     bool& testing = m_config.testing_display;
 
     // Sanity check
-    if(!m_display_initialized){
+    if(!m_initialized){
         log.error("Display not initialized. Call initialize() first!");
         return false;
     }

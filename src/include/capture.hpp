@@ -28,17 +28,27 @@
 
 #include "helpers.hpp"
 
+enum class DequeueStatus {
+    Success,
+    NoBufferInQueue,
+    Error
+};
+
 struct capture_buf {
     int plane_fd[VIDEO_MAX_PLANES]; // For DMA_BUF
     void* plane_addr[VIDEO_MAX_PLANES];
-    size_t plane_size[VIDEO_MAX_PLANES];
+    __u32 plane_length[VIDEO_MAX_PLANES]; // Plane size : frame + padding
+    __u32 plane_bytesused[VIDEO_MAX_PLANES]; // Frame size
+    bool is_queued;
 
     capture_buf(){
         for(int i = 0; i < VIDEO_MAX_PLANES; i++){
             plane_fd[i] = -1;
             plane_addr[i] = nullptr;
-            plane_size[i] = 0;
+            plane_length[i] = 0;
+            plane_bytesused[i] = 0;
         }
+        is_queued = false;
     }
 };
 
@@ -58,6 +68,8 @@ private:
     bool m_is_mp_device{false};
 
     Logger m_logger;
+    bool m_initialized;
+    bool m_stream_is_on{false};
 
     // Caps
     bool checkDeviceCapabilities();
@@ -80,11 +92,12 @@ public:
     Capture(const std::string& device, capture_config& conf, bool verbose);
     ~Capture();
 
-    // Interface
-    bool queueBuffer(__u32 index);
-    bool dequeueBuffer(__u32 index);
 
-    bool start();
-    bool saveOneFrame(const std::string& path);
-    bool stop();
+    bool queueBuffer(__u32 in_buf_index);
+    DequeueStatus dequeueBuffer(__u32 *out_buf_index);
+
+    bool initialize(); // Initialize Capture
+    bool start(); // Start streaming
+    bool saveOneFrame(__u32 buf_index, const std::string& path);
+    bool stop(); // Stop streaming
 };

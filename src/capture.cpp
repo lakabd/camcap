@@ -39,7 +39,7 @@ Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
 
     // Open device
     log.status("Opening device %s", device.c_str());
-    m_fd = open(device.c_str(), O_RDWR | O_CLOEXEC);
+    m_fd = open(device.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if(m_fd < 0)
         log.fatal("Failed to open device " + device + ": " + strerror(errno));
 
@@ -385,9 +385,9 @@ bool Capture::prepareBuffers()
             for(unsigned int k = 0; k < VIDEO_MAX_PLANES; k++){
                 // Unmap previously mapped buffers
                 if(m_capture_buf[j].plane_addr[k] != nullptr){
-                    munmap(m_capture_buf[j].plane_addr[k], m_capture_buf[j].plane_size[k]);
+                    munmap(m_capture_buf[j].plane_addr[k], m_capture_buf[j].plane_length[k]);
                     m_capture_buf[j].plane_addr[k] = nullptr;
-                    m_capture_buf[j].plane_size[k] = 0;
+                    m_capture_buf[j].plane_length[k] = 0;
                 }
                 // Close previously exported buffers
                 if(m_capture_buf[j].plane_fd[k] >= 0){
@@ -421,7 +421,8 @@ bool Capture::prepareBuffers()
                 return false;
             }
             m_capture_buf[i].plane_addr[p] = mapped;
-            m_capture_buf[i].plane_size[p] = planes[p].length;
+            m_capture_buf[i].plane_length[p] = planes[p].length;
+            m_capture_buf[i].plane_bytesused[p] = planes[p].bytesused;
 
             // Export
             expbuf.plane = p;
@@ -471,8 +472,63 @@ bool Capture::queueBuffer(__u32 buf_index)
         log.error("VIDIOC_QBUF failed for buffer %d", buf_index);
         return false;
     }
+
+    // Update buffer info
+    m_capture_buf[buf_index].is_queued = true;
     
     return true;
+}
+
+DequeueStatus Capture::dequeueBuffer(__u32 *out_buf_index)
+{
+    Logger& log = m_logger;
+    struct v4l2_buffer buf{};
+    struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
+    
+    log.info("Dequeuing a buffer");
+
+    // Sanity check
+    if(!out_buf_index){
+        log.error("dequeueBuffer: out_buf_index is NULL");
+        return DequeueStatus::Error;
+    }
+
+    // Fill v4l2_buffer struct
+    buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = m_memory_type;
+    buf.flags = 0;
+    
+    if(m_is_mp_device){
+        buf.m.planes = planes;
+        buf.length   = m_num_planes;
+    }
+    
+    // Dequeue
+    while(ioctl(m_fd, VIDIOC_DQBUF, &buf) == -1){
+        switch(errno){
+            case EAGAIN: // Nothing in the queue
+                return DequeueStatus::NoBufferInQueue;
+            case EINTR: // Interrupted by signal, retry
+                continue;
+            default:
+                log.error("VIDIOC_DQBUF failed with error: %s", strerror(errno));
+                return DequeueStatus::Error;
+        }
+    }
+
+    if(buf.flags & V4L2_BUF_FLAG_ERROR){
+        log.warning("V4L2_BUF_FLAG_ERROR is set for buffer %d", buf.index);
+    }
+
+    *out_buf_index = buf.index;
+
+    // Update buffer info
+    m_capture_buf[buf.index].is_queued = false;
+    for(unsigned int p = 0; p < m_num_planes; p++)
+        m_capture_buf[buf.index].plane_bytesused[p] = planes[p].bytesused;
+    
+    
+    return DequeueStatus::Success;
 }
 
 bool Capture::streamOn()
@@ -492,9 +548,13 @@ bool Capture::streamOn()
     return true;
 }
 
-bool Capture::start()
+bool Capture::initialize()
 {
     Logger& log = m_logger;
+
+    // Don't reinit
+    if(m_initialized)
+        return true;
 
     // Check Caps
     if(!checkDeviceCapabilities()){
@@ -526,10 +586,26 @@ bool Capture::start()
         return false;
     }
 
+    m_initialized = true;
+
+    return true;
+}
+
+bool Capture::start()
+{
+    Logger& log = m_logger;
+
+    // Check if initialized
+    if(!m_initialized){
+        log.error("start: Initialize capture first!");
+        return false;
+    }
+
     // Queue capture buffers
     for(unsigned int i = 0; i < m_config.buf_count; i++){
         if(!queueBuffer(i)){
             log.error("Capture::queueBuffers Failed for index %d !", i);
+            streamOff(); // Flush 'em all
             return false;
         }
     }
@@ -540,78 +616,60 @@ bool Capture::start()
         return false;
     }
 
-    log.status("Capture is ON !");
+    m_stream_is_on = true;
+
+    log.status("Stream is ON !");
 
     return true;
 }
 
-bool Capture::saveOneFrame(const std::string& path)
+bool Capture::saveOneFrame(__u32 buf_index, const std::string& path)
 {
     Logger& log = m_logger;
-    struct v4l2_buffer buf{};
-    struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
     
-    log.status("Capturing one frame to %s", path.c_str());
-
-    // Path sanity check
+    // Sanity check
+    if(!m_stream_is_on){
+        log.error("saveOneFrame: stream is Off!");
+        return false;
+    }
     if(path.empty()){
-        log.error("Output path is empty");
+        log.error("saveOneFrame: Output path is empty");
+        return false;
+    }
+    if(buf_index >= m_config.buf_count){
+        log.error("saveOneFrame: buf_index %d out of range (%d)", buf_index, m_config.buf_count);
+        return false;
+    }
+    if(m_capture_buf[buf_index].is_queued){
+        log.error("saveOneFrame: buffer %d not de-queued !", buf_index);
         return false;
     }
 
-    // Prepare v4l2_buffer struct
-    buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = m_memory_type;
-    
-    if(m_is_mp_device){
-        buf.m.planes = planes;
-        buf.length   = VIDEO_MAX_PLANES;
-    }
-    
-    // Dequeue buffer
-    if(!xioctl(m_fd, VIDIOC_DQBUF, &buf)){ // This will block when no buffer is in the driver's outgoing queue.
-        log.error("VIDIOC_DQBUF failed");
-        return false;
-    }
-    
-    log.info("Dequeued buffer %d", buf.index);
+    log.status("Capturing one frame from buf_index %d to %s", buf_index, path.c_str());
     
     // Open output file
     std::ofstream outfile(path, std::ios::binary);
     if(!outfile.is_open()){
         log.error("Failed to open output file: %s", path.c_str());
-        // Important: re-queue buffer before returning
-        xioctl(m_fd, VIDIOC_QBUF, &buf);
         return false;
     }
     
     // Write frame data
-    if(m_is_mp_device){
-        for(unsigned int p = 0; p < buf.length; p++){
-            if(planes[p].bytesused > 0){
-                outfile.write(static_cast<const char*>(m_capture_buf[buf.index].plane_addr[p]), planes[p].bytesused);
-                // Check if write okay
-                if(outfile.fail()){
-                    log.error("Failed to write plane %d to file: %s", p, strerror(errno));
-                    outfile.close();
-
-                    // Re-queue buffer before returning
-                    xioctl(m_fd, VIDIOC_QBUF, &buf);
-                    return false;
-                }
-                log.info("Wrote plane %d: %u bytes", p, planes[p].bytesused);
-            }
+    for(unsigned int p = 0; p < m_num_planes; p++){
+        void *addr = m_capture_buf[buf_index].plane_addr[p];
+        size_t size = m_capture_buf[buf_index].plane_bytesused[p];
+        outfile.write(static_cast<const char*>(addr), size);
+        // Check if write okay
+        if(outfile.fail()){
+            log.error("Failed to write plane %d to file", p);
+            outfile.close();
+            return false;
         }
+        log.info("Wrote plane %d: %u bytes", p, size);
     }
     
     outfile.close();
     log.info("Frame saved to %s", path.c_str());
-    
-    // Re-queue buffer
-    if(!xioctl(m_fd, VIDIOC_QBUF, &buf)){
-        log.error("VIDIOC_QBUF failed while re-queuing buffer %d", buf.index);
-        return false;
-    }
     
     return true;
 }
@@ -626,6 +684,12 @@ bool Capture::streamOff()
         log.error("VIDIOC_STREAMOFF failed");
         return false;
     }
+
+    m_stream_is_on = false;
+
+    // Update buffer info
+    for(unsigned int i = 0; i < m_config.buf_count; i++)
+        m_capture_buf[i].is_queued = false;
     
     log.info("Streaming stopped successfully");
 
@@ -635,6 +699,10 @@ bool Capture::streamOff()
 bool Capture::stop()
 {
     Logger& log = m_logger;
+
+    // Check if already off
+    if (!m_stream_is_on)
+        return true;
 
     // Stop streaming
     if(!streamOff()){
@@ -656,7 +724,7 @@ Capture::~Capture()
     for(unsigned int i = 0; i < m_config.buf_count; i++){
         for(unsigned int p = 0; p < VIDEO_MAX_PLANES; p++){
             if(m_capture_buf[i].plane_addr[p] != nullptr){
-                munmap(m_capture_buf[i].plane_addr[p], m_capture_buf[i].plane_size[p]);
+                munmap(m_capture_buf[i].plane_addr[p], m_capture_buf[i].plane_length[p]);
                 m_capture_buf[i].plane_addr[p] = nullptr;
             }
             if(m_capture_buf[i].plane_fd[p] >= 0){
