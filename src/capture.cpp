@@ -312,6 +312,8 @@ bool Capture::setFormat()
             m_config.buf.stride = format.fmt.pix_mp.plane_fmt[0].bytesperline;
         }
         
+        m_num_planes = format.fmt.pix_mp.num_planes; // save number of planes
+
         log.info("Format set: %dx%d, num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.num_planes);
     }
 
@@ -439,32 +441,35 @@ bool Capture::prepareBuffers()
     return true;
 }
 
-bool Capture::queueBuffers()
+bool Capture::queueBuffer(__u32 buf_index)
 {
     Logger& log = m_logger;
     struct v4l2_buffer buf{};
     struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
     
-    log.status("Queuing capture buffers");
+    log.info("Queuing buffer %d", buf_index);
+
+    // Sanity check
+    if(buf_index >= m_config.buf_count){
+        log.error("queueBuffer: buf_index %d out of range (%d)", buf_index, m_config.buf_count);
+        return false;
+    }
+
     // Fill v4l2_buffer struct
     buf.type = m_is_mp_device ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = m_memory_type;
+    buf.flags = 0;
     
     if(m_is_mp_device){
         buf.m.planes = planes;
-        buf.length   = VIDEO_MAX_PLANES;
+        buf.length   = m_num_planes;
     }
     
-    // Queue each buffer
-    for(unsigned int i = 0; i < m_config.buf_count; i++){
-        buf.index = i;
-        
-        if(!xioctl(m_fd, VIDIOC_QBUF, &buf)){
-            log.error("VIDIOC_QBUF failed for buffer %d", i);
-            return false;
-        }
-        
-        log.info(". Buffer %d queued", i);
+    // Queue
+    buf.index = buf_index;
+    if(!xioctl(m_fd, VIDIOC_QBUF, &buf)){
+        log.error("VIDIOC_QBUF failed for buffer %d", buf_index);
+        return false;
     }
     
     return true;
@@ -522,9 +527,11 @@ bool Capture::start()
     }
 
     // Queue capture buffers
-    if(!queueBuffers()){
-        log.error("Capture::queueBuffers Failed !");
-        return false;
+    for(unsigned int i = 0; i < m_config.buf_count; i++){
+        if(!queueBuffer(i)){
+            log.error("Capture::queueBuffers Failed for index %d !", i);
+            return false;
+        }
     }
 
     // Start streaming

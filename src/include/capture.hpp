@@ -54,7 +54,9 @@ private:
     struct v4l2_buffer m_v4l2_buf{};
     capture_config m_config{};
     __u32 m_memory_type{};
+    __u32 m_num_planes{};
     bool m_is_mp_device{false};
+
     Logger m_logger;
 
     // Caps
@@ -69,8 +71,6 @@ private:
     // Buffers
     bool requestBuffers();
     bool prepareBuffers();
-    bool queueBuffers();
-    bool dequeueBuffers();
 
     // Streaming
     bool streamOn();
@@ -81,6 +81,9 @@ public:
     ~Capture();
 
     // Interface
+    bool queueBuffer(__u32 index);
+    bool dequeueBuffer(__u32 index);
+
     bool start();
     bool saveOneFrame(const std::string& path);
     bool stop();
