@@ -31,9 +31,9 @@
 // Generic buffer type
 typedef struct {
     std::string fourcc;
-    uint32_t width;
-    uint32_t height;
-    uint32_t stride; // in bytes (pitch)
+    uint32_t width{0};
+    uint32_t height{0};
+    uint32_t stride{0}; // in bytes (pitch)
 } buffer_t;
 
 bool validate_user_buffer(const buffer_t& buf);

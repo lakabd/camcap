@@ -68,7 +68,7 @@ private:
     bool m_is_mp_device{false};
 
     Logger m_logger;
-    bool m_initialized;
+    bool m_initialized{false};
     bool m_stream_is_on{false};
 
     // Caps
@@ -92,6 +92,21 @@ public:
     Capture(const std::string& device, capture_config& conf, bool verbose);
     ~Capture();
 
+    int get_fd(){
+        return (m_initialized) ? m_fd : 0;
+    }
+
+    const capture_config& get_config(){
+        return m_config;
+    }
+
+    int get_buffer_dmafd(__u32 buf_index){
+        if(!m_initialized || !m_stream_is_on)
+            return 0;
+        if(buf_index >= m_config.buf_count)
+            return 0;
+        return m_capture_buf[buf_index].plane_fd[0]; // TODO: add real support for MP formats
+    }
 
     bool queueBuffer(__u32 in_buf_index);
     DequeueStatus dequeueBuffer(__u32 *out_buf_index);

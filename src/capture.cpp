@@ -302,19 +302,21 @@ bool Capture::setFormat()
         }
         // Size changed
         if(format.fmt.pix_mp.width != m_config.buf.width || 
-            format.fmt.pix_mp.height != m_config.buf.height || 
-            format.fmt.pix_mp.plane_fmt[0].bytesperline != m_config.buf.stride) // TODO: This is ugly, we need to check num_planes not just plane 0
+            format.fmt.pix_mp.height != m_config.buf.height) 
         {
-            log.warning("Driver adjusted resolution from %dx%d (s:%d bytes) to %dx%d (s:%d bytes)", m_config.buf.width, m_config.buf.height, m_config.buf.stride,
+            log.warning("Driver adjusted resolution from %dx%d to %dx%d (s:%d bytes)", m_config.buf.width, m_config.buf.height,
                 format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.plane_fmt[0].bytesperline);
             m_config.buf.width = format.fmt.pix_mp.width;
             m_config.buf.height = format.fmt.pix_mp.height;
-            m_config.buf.stride = format.fmt.pix_mp.plane_fmt[0].bytesperline;
         }
-        
-        m_num_planes = format.fmt.pix_mp.num_planes; // save number of planes
 
-        log.info("Format set: %dx%d, num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.num_planes);
+        // Save stride
+        m_config.buf.stride = format.fmt.pix_mp.plane_fmt[0].bytesperline; // TODO: add real support for MP formats
+        
+        // Save number of planes
+        m_num_planes = format.fmt.pix_mp.num_planes;
+
+        log.info("Format set: %dx%d (s: %d bytes), num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, m_config.buf.stride, format.fmt.pix_mp.num_planes);
     }
 
     return true;

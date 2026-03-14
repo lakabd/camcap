@@ -93,7 +93,7 @@ Display::Display(display_config& conf, bool verbose)
         m_gbm_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING; // Defaults to Display + GPU
         m_gpu_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
         if(gbm_device_is_format_supported(m_gbmDev, m_gpu_format, m_gbm_flags) == 0){
-            log.fatal("Specified format " + fourcc + " is NOT supported");
+            log.fatal("Specified GPU buffer format " + fourcc + " is NOT supported");
         }
 
         // Set camera Format
@@ -656,7 +656,7 @@ bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
     int ret = 0;
 
     // Sanity check
-    if(buf_fd < 0 || !out_fbId){
+    if(buf_fd <= 0 || !out_fbId){
         log.error("createFbFromFd: incorrect arguments");
         return false;
     }

@@ -363,6 +363,6 @@ uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type,
 bool validate_user_buffer(const buffer_t& buf) {
     if (buf.fourcc.length() != 4) return false;
     if (buf.width == 0 || buf.height == 0) return false;
-    if (buf.stride < buf.width) return false;
+    if (buf.stride != 0 && buf.stride < buf.width) return false;
     return true;
 }

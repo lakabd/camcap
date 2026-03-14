@@ -31,7 +31,8 @@
 #include "display.hpp"
 #include "capture.hpp"
 
-#define APP_VERBOSITY true
+#define CAPTURE_VERBOSITY true
+#define DISPLAY_VERBOSITY false
 
 #define ISP_MAINPATH    "/dev/video11"
 
@@ -48,7 +49,7 @@ int main(int argc, char* argv[])
 {
     (void) argc;
     (void) argv;
-    int ret = 0;
+    bool ret = 0;
 
     // Setup signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
@@ -56,15 +57,23 @@ int main(int argc, char* argv[])
     // Init capture
     capture_config cam_conf;
     cam_conf.buf.fourcc = "NV12";
-    cam_conf.buf.width = 1920;
+    cam_conf.buf.width  = 1920;
     cam_conf.buf.height = 1080;
-    cam_conf.buf.stride = 1920;
     cam_conf.buf_count = 5;
+    Capture cap(ISP_MAINPATH, cam_conf, CAPTURE_VERBOSITY);
+
+    printf("[MAIN] Initialize camera...\n");
+    ret = cap.initialize();
+    if(!ret){
+        printf("[MAIN] Error on capture initialize() !\n");
+        return -1;
+    }
 
     // Init display
     display_config disp_conf;
-    disp_conf.testing_display = true;
-    Display disp(disp_conf, APP_VERBOSITY);
+    disp_conf.cam_buf = cap.get_config().buf;
+    disp_conf.testing_display = false;
+    Display disp(disp_conf, DISPLAY_VERBOSITY);
     
     printf("[MAIN] Initialize display...\n");
     ret = disp.initialize();
@@ -74,26 +83,63 @@ int main(int argc, char* argv[])
     }
 
     // Init Polls
-    struct pollfd fds;
-    fds.fd = disp.get_fd();
-    fds.events = POLLIN; // Wake up when VSync/Flip event happens
+    struct pollfd fds[2];
+    fds[0].fd = disp.get_fd();
+    fds[0].events = POLLIN; // Wake up when VSync/Flip event happens
+    fds[1].fd = cap.get_fd();
+    fds[1].events = POLLIN; // Wake up on buffer ready
+
+    // Start camera
+    ret = cap.start();
+    if(!ret){
+        printf("[MAIN] Error on capture start() !\n");
+        return -1;
+    }
 
     // Scanout
     printf("[MAIN] Starting loop (Press Ctrl+C to exit)...\n");
 
     while(running){
-        ret = poll(&fds, 1, -1); // Wait indefinitely for an event
+        ret = poll(fds, 2, -1); // Wait indefinitely for an event
 
         if(ret > 0){
-            if (fds.revents & POLLIN) {
+            // Display ready
+            if (fds[0].revents & POLLIN) {
+                // Event callback
                 if(!disp.handleEvent()){
                     printf("[MAIN] Error on display handleEvent() !\n");
                     return -1;
                 }
             }
-            if(!disp.flipPending()){
-                if(!disp.scanout(0)){
-                    printf("[MAIN] Error on display scanout() !\n");
+            // Capture ready
+            if(fds[1].revents & POLLIN){
+                // Dequeue buffer
+                __u32 buf_index = 0;
+                DequeueStatus s = cap.dequeueBuffer(&buf_index);
+                if(s == DequeueStatus::Error){
+                    printf("[MAIN] Error on capture dequeueBuffer() !\n");
+                    return -1;
+                }
+                else if(s == DequeueStatus::NoBufferInQueue){
+                    continue;
+                }
+                // save one frame 
+                //cap.saveOneFrame(buf_index, "./frame.yuv");
+
+                // If display ready, send buffer
+                if(!disp.flipPending()){
+                    if(!disp.scanout(cap.get_buffer_dmafd(buf_index))){
+                        printf("[MAIN] Error on display scanout() !\n");
+                        return -1;
+                    }
+                }
+                // Wait for display to finish. TODO: replace by a pending queue
+                usleep(5000);
+
+                // Push buffer back
+                ret = cap.queueBuffer(buf_index);
+                if(!ret){
+                    printf("[MAIN] Error on capture queueBuffer() !\n");
                     return -1;
                 }
             }

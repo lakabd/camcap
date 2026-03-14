@@ -36,7 +36,15 @@ void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, vo
 struct display_config {
     buffer_t cam_buf;
     buffer_t gpu_buf;
-    bool testing_display; // test dimensions: display mode settings & test format: XR24
+    bool testing_display{false}; // test dimensions: display mode settings & test format: XR24
+
+    display_config(){
+        // keep these till Render class is implemented
+        gpu_buf.fourcc = "XR24";
+        gpu_buf.width = 1; //dummy
+        gpu_buf.height = 1; //dummy
+        gpu_buf.stride = 1; //dummy
+    }
 };
 
 typedef struct {
