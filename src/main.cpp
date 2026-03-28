@@ -26,6 +26,7 @@
 #include <thread>
 #include <chrono>
 #include <poll.h>
+#include <queue>
 
 #include "helpers.hpp"
 #include "display.hpp"
@@ -37,11 +38,13 @@
 #define ISP_MAINPATH    "/dev/video11"
 
 static std::atomic<bool> running(true);
+int main_ret = 0;
 
 void signalHandler(int signal)
 {
     if(signal == SIGINT){
         running = false;
+        main_ret = 0;
     }
 }
 
@@ -49,7 +52,9 @@ int main(int argc, char* argv[])
 {
     (void) argc;
     (void) argv;
-    bool ret = 0;
+    __u32 current_buf_index = 0;
+    int previous_buf_index = -1;
+    std::queue<__u32> display_queue; // list of buffers ready to scanout
 
     // Setup signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
@@ -63,8 +68,7 @@ int main(int argc, char* argv[])
     Capture cap(ISP_MAINPATH, cam_conf, CAPTURE_VERBOSITY);
 
     printf("[MAIN] Initialize camera...\n");
-    ret = cap.initialize();
-    if(!ret){
+    if(!cap.initialize()){
         printf("[MAIN] Error on capture initialize() !\n");
         return -1;
     }
@@ -76,22 +80,20 @@ int main(int argc, char* argv[])
     Display disp(disp_conf, DISPLAY_VERBOSITY);
     
     printf("[MAIN] Initialize display...\n");
-    ret = disp.initialize();
-    if(!ret){
+    if(!disp.initialize()){
         printf("[MAIN] Error on display initialize() !\n");
         return -1;
     }
 
     // Init Polls
     struct pollfd fds[2];
-    fds[0].fd = disp.get_fd();
-    fds[0].events = POLLIN; // Wake up when VSync/Flip event happens
-    fds[1].fd = cap.get_fd();
-    fds[1].events = POLLIN; // Wake up on buffer ready
+    fds[0].fd = cap.get_fd();
+    fds[0].events = POLLIN; // Wake up on buffer ready
+    fds[1].fd = disp.get_fd();
+    fds[1].events = POLLIN; // Wake up when VSync/Flip event happens
 
     // Start camera
-    ret = cap.start();
-    if(!ret){
+    if(!cap.start()){
         printf("[MAIN] Error on capture start() !\n");
         return -1;
     }
@@ -100,52 +102,67 @@ int main(int argc, char* argv[])
     printf("[MAIN] Starting loop (Press Ctrl+C to exit)...\n");
 
     while(running){
-        ret = poll(fds, 2, -1); // Wait indefinitely for an event
+        int poll_result = poll(fds, 2, -1); // Wait for an event
 
-        if(ret > 0){
-            // Display ready
-            if (fds[0].revents & POLLIN) {
-                // Event callback
-                if(!disp.handleEvent()){
-                    printf("[MAIN] Error on display handleEvent() !\n");
-                    return -1;
-                }
-            }
+        if(poll_result > 0){
             // Capture ready
-            if(fds[1].revents & POLLIN){
+            if(fds[0].revents & POLLIN){
                 // Dequeue buffer
-                __u32 buf_index = 0;
-                DequeueStatus s = cap.dequeueBuffer(&buf_index);
+                DequeueStatus s = cap.dequeueBuffer(&current_buf_index);
                 if(s == DequeueStatus::Error){
                     printf("[MAIN] Error on capture dequeueBuffer() !\n");
-                    return -1;
+                    main_ret = -1;
+                    break;
                 }
-                else if(s == DequeueStatus::NoBufferInQueue){
-                    continue;
-                }
-                // save one frame 
-                //cap.saveOneFrame(buf_index, "./frame.yuv");
-
-                // If display ready, send buffer
-                if(!disp.flipPending()){
-                    if(!disp.scanout(cap.get_buffer_dmafd(buf_index))){
-                        printf("[MAIN] Error on display scanout() !\n");
-                        return -1;
-                    }
-                }
-                // Wait for display to finish. TODO: replace by a pending queue
-                usleep(5000);
-
-                // Push buffer back
-                ret = cap.queueBuffer(buf_index);
-                if(!ret){
-                    printf("[MAIN] Error on capture queueBuffer() !\n");
-                    return -1;
+                else if(s == DequeueStatus::Success){
+                    // Fill display queue
+                    display_queue.push(current_buf_index);
                 }
             }
+
+            // Display ready
+            if(fds[1].revents & POLLIN){
+                // Queue back previously displayed buffer
+                if(previous_buf_index >= 0){
+                    if(!cap.queueBuffer(static_cast<__u32>(previous_buf_index))){
+                        printf("[MAIN] Error on capture queueBuffer() !\n");
+                        main_ret = -1;
+                        break;
+                    }
+                }
+                // Update pageflip status
+                if(!disp.handleEvent()){
+                    printf("[MAIN] Error on display handleEvent() !\n");
+                    main_ret = -1;
+                    break;
+                }
+            }
+
+            // Scanout
+            if(!display_queue.empty() && !disp.flipPending()){
+                current_buf_index = display_queue.front();
+                if(!disp.scanout(cap.get_buffer_dmafd(current_buf_index))){
+                    printf("[MAIN] Error on display scanout() !\n");
+                    main_ret = -1;
+                    break;
+                }
+                display_queue.pop(); // Pop display queue
+                previous_buf_index = current_buf_index;
+            }
+        }
+        else {
+            if(errno != EINTR){
+                printf("[MAIN] poll failure: %s !\n", strerror(errno));
+                main_ret = -1;
+            }
+            break;
         }
     }
 
     printf("[MAIN] Exiting...\n");
-    return 0;
+
+    // Stop Capture
+    cap.stop();
+
+    return main_ret;
 }
