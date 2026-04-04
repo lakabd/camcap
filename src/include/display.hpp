@@ -43,7 +43,7 @@ struct display_config {
         gpu_buf.fourcc = "XR24";
         gpu_buf.width = 1; //dummy
         gpu_buf.height = 1; //dummy
-        gpu_buf.stride = 1; //dummy
+        gpu_buf.stride[0] = 1; //dummy
     }
 };
 
@@ -72,12 +72,15 @@ private:
     uint32_t m_gbm_flags{0};
     uint32_t m_gpu_format{0};
     uint32_t m_cam_format{0};
+    uint8_t  m_cam_format_nplanes{0};
+    bool m_cam_format_packed{false};
+
     uint32_t m_testPattern_FbId{0};
     uint32_t m_splashscreen_FbId{0};
 
     drmEventContext m_drm_evctx{};
     frame_info_t m_frame{};
-    std::map<int, uint32_t> m_fb_map{}; // <key: buffer dma_fd, value: drm framebuffer id>
+    std::map<int, uint32_t> m_fb_map{}; // <key: dma_fd of plane 0, value: drm framebuffer id>
     
     display_config m_config{};
     Logger m_logger;
@@ -94,7 +97,7 @@ private:
     bool atomicUpdate(uint32_t fbId);
 
     // Camera buffer
-    bool createFbFromFd(int buf_fd, uint32_t *out_fbId);
+    bool createFbFromFd(std::array<int, DRM_MAX_PLANES_PER_FRAME>& buf_fds, uint32_t *out_fbId);
 
     // GPU buffer
     bool importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo);
@@ -113,6 +116,6 @@ public:
     }
 
     bool initialize(); // Initialize the display
-    bool scanout(int buf_fd); // Scanout buf_fd. Non-blocking call
+    bool scanout(std::array<int, DRM_MAX_PLANES_PER_FRAME>& cam_buf_fds); // Scanout buf_fds. Non-blocking call
     bool handleEvent(); // Handle DRM events e.g., page flip
 };

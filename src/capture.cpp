@@ -45,7 +45,7 @@ Capture::Capture(const std::string& device, capture_config& conf, bool verbose)
 
     try{
         // Check config
-        if(!validate_user_buffer(m_config.buf)){
+        if(!validate_buffer_t(m_config.buf, false)){
             log.fatal("Capture buffer size or format not correctly defined. Please check!");
         }
         if(m_config.buf_count == 0)
@@ -304,19 +304,17 @@ bool Capture::setFormat()
         if(format.fmt.pix_mp.width != m_config.buf.width || 
             format.fmt.pix_mp.height != m_config.buf.height) 
         {
-            log.warning("Driver adjusted resolution from %dx%d to %dx%d (s:%d bytes)", m_config.buf.width, m_config.buf.height,
-                format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.plane_fmt[0].bytesperline);
+            log.warning("Driver adjusted resolution from %dx%d to %dx%d", m_config.buf.width, m_config.buf.height,
+                format.fmt.pix_mp.width, format.fmt.pix_mp.height);
             m_config.buf.width = format.fmt.pix_mp.width;
             m_config.buf.height = format.fmt.pix_mp.height;
         }
-
-        // Save stride
-        m_config.buf.stride = format.fmt.pix_mp.plane_fmt[0].bytesperline; // TODO: add real support for MP formats
-        
-        // Save number of planes
+        // Save strides
         m_num_planes = format.fmt.pix_mp.num_planes;
+        for(__u32 i=0; i < m_num_planes; i++)
+            m_config.buf.stride[i] = format.fmt.pix_mp.plane_fmt[i].bytesperline;
 
-        log.info("Format set: %dx%d (s: %d bytes), num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, m_config.buf.stride, format.fmt.pix_mp.num_planes);
+        log.info("Format set: %dx%d, num_planes=%d", format.fmt.pix_mp.width, format.fmt.pix_mp.height, format.fmt.pix_mp.num_planes);
     }
 
     return true;

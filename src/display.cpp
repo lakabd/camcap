@@ -36,10 +36,10 @@ Display::Display(display_config& conf, bool verbose)
 
     // Sanity check
     if(!m_config.testing_display){
-        if(!validate_user_buffer(m_config.cam_buf)){
+        if(!validate_buffer_t(m_config.cam_buf, true)){
             log.fatal("User input: Camera buffer size or format invalid !");
         }
-        if(!validate_user_buffer(m_config.gpu_buf)){
+        if(!validate_buffer_t(m_config.gpu_buf, true)){
             log.fatal("User input: GPU buffer size or format invalid !");
         }
     }
@@ -81,14 +81,14 @@ Display::Display(display_config& conf, bool verbose)
             log.fatal("Enabling atomic modesettings failed !");
         }
 
-        // Create GBM device
+        // GPU: Create GBM device
         m_gbmDev = gbm_create_device(m_drmFd);
         if(!m_gbmDev){
             log.fatal("Failed to create GBM device");
         }
         log.info("GBM backend: %s", gbm_device_get_backend_name(m_gbmDev));
 
-        // Validate GPU format
+        // GPU: Validate format
         std::string& fourcc = m_config.gpu_buf.fourcc;
         m_gbm_flags = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING; // Defaults to Display + GPU
         m_gpu_format = __gbm_fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
@@ -96,9 +96,19 @@ Display::Display(display_config& conf, bool verbose)
             log.fatal("Specified GPU buffer format " + fourcc + " is NOT supported");
         }
 
-        // Set camera Format
+        // Camera: Validate format
         fourcc = m_config.cam_buf.fourcc;
+        if(!fourcc_v4l2_to_drm(fourcc)){
+            log.fatal("Specified CAM buffer format " + fourcc + " has no DRM equivalent");
+        }
         m_cam_format = fourcc_code(fourcc[0], fourcc[1], fourcc[2], fourcc[3]);
+        m_cam_format_nplanes = get_drm_fmt_nplanes(m_cam_format);
+        if(m_cam_format_nplanes == 0){
+            log.fatal("Specified CAM buffer format " + fourcc + " is invalide for Display");
+        }
+        if(m_cam_format_nplanes > 1 && m_config.cam_buf.stride[1] == 0){
+            m_cam_format_packed = true;
+        }
 
     } catch (...) {
         if(m_gbmDev) gbm_device_destroy(m_gbmDev);
@@ -636,7 +646,7 @@ bool Display::importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo)
     idata.fd = buf_fd;
     idata.width = m_config.gpu_buf.width;
     idata.height = m_config.gpu_buf.height;
-    idata.stride = m_config.gpu_buf.stride;
+    //idata.stride = m_config.gpu_buf.stride;
     idata.format = m_gpu_format;
     
     *out_bo = gbm_bo_import(m_gbmDev, GBM_BO_IMPORT_FD, &idata, m_gbm_flags);
@@ -645,30 +655,24 @@ bool Display::importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo)
         return false;
     }
 
-    log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", idata.fd, idata.width, idata.height, idata.stride);
+    //log.info("Successfully imported DMA_BUF: fd=%d, %ux%u, stride=%u", idata.fd, idata.width, idata.height, idata.stride);
 
     return true;
 }
 
-bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
+bool Display::createFbFromFd(std::array<int, DRM_MAX_PLANES_PER_FRAME>& buf_fds, uint32_t *out_fbId)
 {
     Logger& log = m_logger;
     int ret = 0;
 
-    // Sanity check
-    if(buf_fd <= 0 || !out_fbId){
+    // Sanity check: at least the first plan's FD is defined
+    if(buf_fds[0] < 0 || !out_fbId){
         log.error("createFbFromFd: incorrect arguments");
         return false;
     }
 
-    // We support only NV12 for now
-    if(m_cam_format != DRM_FORMAT_NV12){
-        log.error("createFbFromFd: Only supporting NV12 for now.");
-        return false;
-    }
-
     // Check if buf_fd already cached
-    auto it = m_fb_map.find(buf_fd);
+    auto it = m_fb_map.find(buf_fds[0]);
     if(it != m_fb_map.end()){
         *out_fbId = it->second;
         return true;
@@ -676,23 +680,38 @@ bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
 
     log.info("Importing Camera buffer.");
 
-    // Create GEM handle
-    uint32_t handle;
-    ret = drmPrimeFDToHandle(m_drmFd, buf_fd, &handle);
-    if(ret < 0){
-        log.error("drmPrimeFDToHandle failed: cannot import DMA_BUF: %s", strerror(errno));
-        return false;
-    }
-
-    // Create FB
-    uint32_t stride = m_config.cam_buf.stride;
+    // Get buf width & height
     uint32_t height = m_config.cam_buf.height;
     uint32_t width = m_config.cam_buf.width;
 
-    uint32_t handles[4] = {handle, handle, 0, 0};
-    uint32_t pitches[4] = {stride, stride, 0, 0};
-    uint32_t offsets[4] = {0, stride*height, 0, 0}; // Here assuming UV is packed directly after Y plane
+    // Create GEM handles
+    uint32_t handles[DRM_MAX_PLANES_PER_FRAME]{};
+    uint32_t pitches[DRM_MAX_PLANES_PER_FRAME]{};
+    uint32_t offsets[DRM_MAX_PLANES_PER_FRAME]{};
+    for(int i = 0; i < DRM_MAX_PLANES_PER_FRAME; i++){
+        if(buf_fds[i] >= 0){
+            ret = drmPrimeFDToHandle(m_drmFd, buf_fds[i], &handles[i]);
+            if(ret < 0){
+                log.error("drmPrimeFDToHandle failed: cannot import DMA_BUF: %s", strerror(errno));
+                goto err;
+            }
+            pitches[i] = m_config.cam_buf.stride[i];
+        }
+        offsets[i] = 0;
+    }
 
+    // Handle packed MP fromats: only one FD for all the planes
+    if(m_cam_format_packed){
+        for(int i = 0; i < m_cam_format_nplanes; i++){
+            handles[i] = handles[0]; // use the same handle for all planes
+        }
+        if(!pfmt_calculate_planes_info(m_cam_format, height, pitches, offsets)){
+            log.error("createFbFromFd: pfmt_get_planes_info failed");
+            goto err;
+        }
+    }
+
+    // Create FB
     ret = drmModeAddFB2(m_drmFd, width, height, m_cam_format, handles, pitches, offsets, out_fbId, 0);
     if(ret < 0){
         log.error("drmModeAddFB2 failed: %s", strerror(errno));
@@ -700,17 +719,24 @@ bool Display::createFbFromFd(int buf_fd, uint32_t *out_fbId)
     }
 
     // Cache new FB
-    m_fb_map.emplace(buf_fd, *out_fbId);
+    m_fb_map.emplace(buf_fds[0], *out_fbId);
 
     ret = 0;
     goto cleanup;
 
 err:
+    *out_fbId = 0;
     ret = -1;
 cleanup:
     struct drm_gem_close clreq{};
-    clreq.handle = handle;
-    drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
+    for(int i = 0; i < DRM_MAX_PLANES_PER_FRAME; i++){
+        if(handles[i]){
+            clreq.handle = handles[i];
+            drmIoctl(m_drmFd, DRM_IOCTL_GEM_CLOSE, &clreq);
+        }
+        if(m_cam_format_packed) // we've got only one handle
+            break;
+    }
     return (ret == 0);
 }
 
@@ -792,7 +818,7 @@ bool Display::atomicUpdate(uint32_t cam_fbId) // TODO: add gpu_fbId
     return (ret == 0) ? true : false;
 }
 
-bool Display::scanout(int cam_buf_fd)
+bool Display::scanout(std::array<int, DRM_MAX_PLANES_PER_FRAME>& cam_buf_fds)
 {
     Logger& log = m_logger;
     uint32_t cam_fbId = 0; // FB will be cached and removed in destructor
@@ -809,7 +835,7 @@ bool Display::scanout(int cam_buf_fd)
 
     // Import camera FB
     if(!testing){
-        if(!createFbFromFd(cam_buf_fd, &cam_fbId)){
+        if(!createFbFromFd(cam_buf_fds, &cam_fbId)){
             log.error("createFbFromFd() failed!");
             return false;
         }
@@ -826,7 +852,7 @@ bool Display::scanout(int cam_buf_fd)
         if(!atomicUpdate(cam_fbId)){
             log.error("atomicUpdate() failed!");
             drmModeRmFB(m_drmFd, cam_fbId);
-            m_fb_map.erase(cam_buf_fd); // Erase corresponding entry
+            m_fb_map.erase(cam_buf_fds[0]); // Erase corresponding entry
             return false;
         }
     }
@@ -838,6 +864,20 @@ Display::~Display()
 {
     Logger& log = m_logger;
     log.status("Quitting...");
+
+/*     // Turn off display / detach plane to free references and avoid CMA memory leak
+    if(m_initialized && m_drmFd >= 0 && m_primaryPlaneId > 0 && m_crtcId > 0){
+        drmModeAtomicReq *req = drmModeAtomicAlloc();
+        if(req){
+            uint32_t prop_crtc_active = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "ACTIVE");
+            if(prop_crtc_active) drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_active, 0);
+            
+            if(m_modePropFb_id) drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, 0);
+            
+            drmModeAtomicCommit(m_drmFd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr);
+            drmModeAtomicFree(req);
+        }
+    } */
 
     // Free used FBs
     for(const auto& pair : m_fb_map){

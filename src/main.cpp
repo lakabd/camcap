@@ -33,7 +33,7 @@
 #include "capture.hpp"
 
 #define CAPTURE_VERBOSITY false
-#define DISPLAY_VERBOSITY false
+#define DISPLAY_VERBOSITY true
 
 #define ISP_MAINPATH    "/dev/video11"
 
@@ -56,13 +56,14 @@ int main(int argc, char* argv[])
     int previous_buf_index = -1;
     std::queue<__u32> display_queue; // list of buffers ready to scanout
     bool zero_frame_drop = false;
+    std::array<int, DRM_MAX_PLANES_PER_FRAME> dma_fds;
 
     // Setup signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
 
     // Init capture
     capture_config cam_conf;
-    cam_conf.buf.fourcc = "NV12";
+    cam_conf.buf.fourcc = "NM21";
     cam_conf.buf.width  = 1920;
     cam_conf.buf.height = 1080;
     cam_conf.buf_count = 5;
@@ -143,7 +144,12 @@ int main(int argc, char* argv[])
                 // Scanout
                 if(!display_queue.empty() && !disp.flipPending()){
                     current_buf_index = display_queue.front();
-                    if(!disp.scanout(cap.get_buffer_dmafd(current_buf_index))){
+                    if(!cap.get_buffer_dmafds(current_buf_index, dma_fds)){
+                        printf("[MAIN] Error on capture get_buffer_dmafd() !\n");
+                        main_ret = -1;
+                        break;
+                    }
+                    if(!disp.scanout(dma_fds)){
                         printf("[MAIN] Error on display scanout() !\n");
                         main_ret = -1;
                         break;
@@ -202,7 +208,12 @@ int main(int argc, char* argv[])
                     }
                     // Scanout
                     if(!disp.flipPending()){
-                        if(!disp.scanout(cap.get_buffer_dmafd(current_buf_index))){
+                        if(!cap.get_buffer_dmafds(current_buf_index, dma_fds)){
+                            printf("[MAIN] Error on capture get_buffer_dmafd() !\n");
+                            main_ret = -1;
+                            break;
+                        }
+                        if(!disp.scanout(dma_fds)){
                             printf("[MAIN] Error on display scanout() !\n");
                             main_ret = -1;
                             break;

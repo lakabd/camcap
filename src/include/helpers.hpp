@@ -28,15 +28,17 @@
 #include <xf86drmMode.h>
 #include <string>
 
+#define DRM_MAX_PLANES_PER_FRAME  4 // DRM maximum number of Planes/DMA_FDs per frame (MP)
+
 // Generic buffer type
 typedef struct {
     std::string fourcc;
     uint32_t width{0};
     uint32_t height{0};
-    uint32_t stride{0}; // in bytes (pitch)
+    uint32_t stride[VIDEO_MAX_PLANES]{0}; // Array of strides for MP format support. Value in bytes (pitch)
 } buffer_t;
 
-bool validate_user_buffer(const buffer_t& buf);
+bool validate_buffer_t(const buffer_t& buf, bool validate_stride);
 
 // V4L2
 bool xioctl(int fd, unsigned long req, void *arg);
@@ -49,3 +51,6 @@ void print_drmModeEncoder(drmModeEncoder *enc);
 void print_drmModeCrtc(drmModeCrtc *crtc);
 void print_drmModePlane(drmModePlane *plane);
 uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type, const char *name);
+uint8_t get_drm_fmt_nplanes(uint32_t drm_format);
+bool pfmt_calculate_planes_info(uint32_t drm_format, uint32_t height, uint32_t *pitches, uint32_t *offsets);
+bool fourcc_v4l2_to_drm(std::string& fourcc);

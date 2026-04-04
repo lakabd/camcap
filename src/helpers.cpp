@@ -25,6 +25,8 @@
 #include <cstring>
 #include <cstdio>
 #include <vector>
+#include <drm/drm_fourcc.h>
+
 #include "helpers.hpp"
 
 bool xioctl(int fd, unsigned long req, void *arg)
@@ -360,9 +362,146 @@ uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type,
     return prop_id;
 }
 
-bool validate_user_buffer(const buffer_t& buf) {
-    if (buf.fourcc.length() != 4) return false;
-    if (buf.width == 0 || buf.height == 0) return false;
-    if (buf.stride != 0 && buf.stride < buf.width) return false;
+bool validate_buffer_t(const buffer_t& buf, bool validate_stride)
+{
+    if(buf.fourcc.length() != 4) return false;
+    if(buf.width == 0 || buf.height == 0) return false;
+    if(validate_stride){
+        if(buf.stride[0] == 0) return false; // At least the first plane's stride is defined
+    }
+    return true;
+}
+
+uint8_t get_drm_fmt_nplanes(uint32_t drm_format)
+{
+    switch(drm_format){
+        /* --- 1-Plane Formats --- */
+        case DRM_FORMAT_UYVY:
+        case DRM_FORMAT_YUYV:
+        case DRM_FORMAT_YVYU:
+        case DRM_FORMAT_VYUY:
+        case DRM_FORMAT_XRGB8888:
+        case DRM_FORMAT_ARGB8888:
+        case DRM_FORMAT_XBGR8888:
+        case DRM_FORMAT_ABGR8888:
+        case DRM_FORMAT_RGB565:
+        case DRM_FORMAT_BGR565:
+            return 1;
+
+        /* --- 2-Plane Formats --- */
+        case DRM_FORMAT_NV16:
+        case DRM_FORMAT_NV61:
+        case DRM_FORMAT_NV12:
+        case DRM_FORMAT_NV21:
+            return 2;
+
+        /* --- 3-Plane Formats --- */
+        case DRM_FORMAT_YUV420:
+        case DRM_FORMAT_YVU420:
+        case DRM_FORMAT_YUV422:
+        case DRM_FORMAT_YVU422:
+        case DRM_FORMAT_YUV444:
+        case DRM_FORMAT_YVU444:
+            return 3;
+
+        default:
+            // Return 0 for unknown formats
+            return 0;
+    }
+}
+
+bool pfmt_calculate_planes_info(uint32_t drm_format, uint32_t height, uint32_t *pitches, uint32_t *offsets)
+{
+    // Sanity check
+    if(!pitches || !offsets || pitches[0] == 0){
+        return false;
+    }
+
+    uint32_t luma_stride = pitches[0];
+    uint32_t luma_size = luma_stride * height;
+
+    // Plane 0 (Luma) always starts at the beginning of the buffer
+    offsets[0] = 0;
+
+    switch(drm_format){
+        /* --- 2-Plane Formats --- */
+        case DRM_FORMAT_NV12:
+        case DRM_FORMAT_NV21:
+            // 4:2:0 Semi-planar: 
+            // UV plane is interleaved (same stride as Luma), but half the height.
+            offsets[1] = luma_size;
+            pitches[1] = luma_stride;
+            break;
+
+        case DRM_FORMAT_NV16:
+        case DRM_FORMAT_NV61:
+            // 4:2:2 Semi-planar: 
+            // UV plane is interleaved (same stride), but full height.
+            offsets[1] = luma_size;
+            pitches[1] = luma_stride;
+            break;
+
+        /* --- 3-Plane Formats --- */
+        case DRM_FORMAT_YUV420:
+        case DRM_FORMAT_YVU420:
+            // 4:2:0 Planar (I420/YV12): 
+            // U & V are separate planes. Both are half width (half stride) and half height.
+            offsets[1] = luma_size;
+            pitches[1] = luma_stride / 2;
+            
+            // Plane 2 starts after Plane 1's memory block finishes
+            offsets[2] = offsets[1] + (pitches[1] * (height / 2));
+            pitches[2] = luma_stride / 2;
+            break;
+
+        case DRM_FORMAT_YUV422:
+        case DRM_FORMAT_YVU422:
+            // 4:2:2 Planar: 
+            // U & V are separate planes. Both are half width (half stride) but full height.
+            offsets[1] = luma_size;
+            pitches[1] = luma_stride / 2;
+
+            offsets[2] = offsets[1] + (pitches[1] * height);
+            pitches[2] = luma_stride / 2;
+            break;
+
+        case DRM_FORMAT_YUV444:
+        case DRM_FORMAT_YVU444:
+            // 4:4:4 Planar: 
+            // U & V are separate planes. Both are full width (same stride) and full height.
+            offsets[1] = luma_size;
+            pitches[1] = luma_stride;
+
+            offsets[2] = offsets[1] + (pitches[1] * height);
+            pitches[2] = luma_stride;
+            break;
+
+        default:
+            // Only above packed MP formats for now.
+            break;
+    }
+
+    return true;
+}
+
+bool fourcc_v4l2_to_drm(std::string& fourcc)
+{
+    if(fourcc.length() != 4){
+        return false;
+    }
+
+    // Convert MP V4L2 formats to their DRM equivalents
+    if(fourcc == "NM12")      fourcc = "NV12";
+    else if(fourcc == "NM21") fourcc = "NV21";
+    else if(fourcc == "NM16") fourcc = "NV16";
+    else if(fourcc == "NM61") fourcc = "NV61";
+    else if(fourcc == "YM12") fourcc = "YU12"; // DRM_FORMAT_YUV420
+    else if(fourcc == "YM21") fourcc = "YV12"; // DRM_FORMAT_YVU420
+    else if(fourcc == "YM16") fourcc = "YU16"; // DRM_FORMAT_YUV422
+    else if(fourcc == "YM61") fourcc = "YV16"; // DRM_FORMAT_YVU422
+    else if(fourcc == "YM24") fourcc = "YU24"; // DRM_FORMAT_YUV444
+    else if(fourcc == "YM42") fourcc = "YV24"; // DRM_FORMAT_YVU444
+
+    // Assume other formats are the same for both.
     return true;
 }

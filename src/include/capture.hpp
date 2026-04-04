@@ -24,8 +24,9 @@
 
 #include <vector>
 #include <linux/videodev2.h>
-#include "logger.hpp"
+#include <array>
 
+#include "logger.hpp"
 #include "helpers.hpp"
 
 enum class DequeueStatus {
@@ -100,12 +101,14 @@ public:
         return m_config;
     }
 
-    int get_buffer_dmafd(__u32 buf_index){
-        if(!m_initialized || !m_stream_is_on)
-            return 0;
+    bool get_buffer_dmafds(__u32 buf_index, std::array<int, DRM_MAX_PLANES_PER_FRAME>& buf_fds){
+        if(!m_initialized)
+            return false;
         if(buf_index >= m_config.buf_count)
-            return 0;
-        return m_capture_buf[buf_index].plane_fd[0]; // TODO: add real support for MP formats
+            return false;
+        for(int i=0; i < DRM_MAX_PLANES_PER_FRAME; i++)
+            buf_fds[i] = m_capture_buf[buf_index].plane_fd[i];
+        return true;
     }
 
     bool queueBuffer(__u32 in_buf_index);
