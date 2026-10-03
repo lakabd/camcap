@@ -24,9 +24,9 @@
 
 #include <gbm.h>
 #include <drm/drm.h>
-#include <xf86drm.h>
-#include <xf86drmMode.h>
 #include <map>
+#include <poll.h>
+
 #include "logger.hpp"
 #include "helpers.hpp"
 
@@ -36,9 +36,12 @@ void eventCb(int fd, unsigned int frame, unsigned int sec, unsigned int usec, vo
 struct display_config {
     buffer_t cam_buf;
     buffer_t gpu_buf;
+    moodycamel::BlockingReaderWriterQueue<std::shared_ptr<uint32_t>>* frames_queue;
+    
     bool testing_display{false}; // test dimensions: display mode settings & test format: XR24
 
     display_config(){
+        frames_queue = nullptr;
         // keep these till Render class is implemented
         gpu_buf.fourcc = "XR24";
         gpu_buf.width = 1; //dummy
@@ -51,8 +54,9 @@ typedef struct {
     unsigned int count;
     unsigned int sec;
     unsigned int usec;
-    bool flip_pending;
-} frame_info_t;
+    float refresh_rate;
+    bool complete{true};
+} scanout_status_t;
 
 class Display {
 private:
@@ -79,12 +83,22 @@ private:
     uint32_t m_splashscreen_FbId{0};
 
     drmEventContext m_drm_evctx{};
-    frame_info_t m_frame{};
+    scanout_status_t m_scanout_status{};
+    bool m_display_is_on{false};
     std::map<int, uint32_t> m_fb_map{}; // <key: dma_fd of plane 0, value: drm framebuffer id>
     
     display_config m_config{};
     Logger m_logger;
     bool m_initialized{false};
+
+    std::jthread m_worker;
+    std::atomic<bool> m_healthy{true};
+
+    // Frame lifecycle:
+    // Whenever a frame is no more owned by one of these, its framebuffer is recycled back to capture
+    std::shared_ptr<uint32_t> m_next_frame;   // waiting to be committed
+    std::shared_ptr<uint32_t> m_pending_frame;      // committed, waiting for vblank
+    std::shared_ptr<uint32_t> m_on_screen_frame;    // currently displayed
 
     bool getResources();
     bool findConnector();
@@ -95,6 +109,8 @@ private:
     bool loadSplashScreen();
     bool atomicModeSet();
     bool atomicUpdate(uint32_t fbId);
+    bool handleEvent(); // Handle DRM events e.g., page flip
+    bool scanout(std::array<int, DRM_MAX_PLANES_PER_FRAME>& cam_buf_fds); // Scanout buf_fds. Non-blocking call
 
     // Camera buffer
     bool createFbFromFd(std::array<int, DRM_MAX_PLANES_PER_FRAME>& buf_fds, uint32_t *out_fbId);
@@ -103,19 +119,18 @@ private:
     bool importGbmBoFromFD(int buf_fd, struct gbm_bo **out_bo);
     bool createFbFromGbmBo(struct gbm_bo *bo, uint32_t *out_fbId);
 
+    // Worker
+    void workerLoop(std::stop_token st);
+
 public:
     Display(display_config& conf, bool verbose);
     ~Display();
 
-    int get_fd(){
-        return m_drmFd;
+    bool is_healthy() const {
+        return m_healthy.load(); 
     }
 
-    bool flipPending(){
-        return m_frame.flip_pending;
-    }
-
-    bool initialize(); // Initialize the display
-    bool scanout(std::array<int, DRM_MAX_PLANES_PER_FRAME>& cam_buf_fds); // Scanout buf_fds. Non-blocking call
-    bool handleEvent(); // Handle DRM events e.g., page flip
+    bool initialize();
+    bool start();
+    bool stop();
 };

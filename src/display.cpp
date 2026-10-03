@@ -42,6 +42,9 @@ Display::Display(display_config& conf, bool verbose)
         if(!validate_buffer_t(m_config.gpu_buf, true)){
             log.fatal("User input: GPU buffer size or format invalid !");
         }
+        if(!m_config.frames_queue){
+            log.fatal("User input: No frame queue was specified !");
+        }
     }
     else {
         // Tests
@@ -415,17 +418,16 @@ bool Display::atomicModeSet()
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_x, 0);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_y, 0);
 
-    // Setup event context
+    // Setup event context & user_data
     m_drm_evctx.version = 2;
     m_drm_evctx.page_flip_handler = eventCb;
     
     // Commit
-    ret = drmModeAtomicCommit(m_drmFd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_ALLOW_MODESET, &m_frame);
+    ret = drmModeAtomicCommit(m_drmFd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_ALLOW_MODESET, &m_scanout_status);
     if(ret < 0){
         log.error("drmModeAtomicCommit: Atomic commit failed: %s", strerror(errno));
     } else {
-        m_frame.flip_pending = true;
-        log.status("Display is On!");
+        m_scanout_status.complete = false;
     }
 
     drmModeAtomicFree(req);
@@ -492,6 +494,27 @@ bool Display::initialize()
     }
 
     m_initialized = true;
+
+    return true;
+}
+
+bool Display::start()
+{
+    Logger& log = m_logger;
+
+    if(!m_initialized){
+        log.error("start: Initialize Display first!");
+        return false;
+    }
+
+    // Start worker
+    m_worker = std::jthread([this](std::stop_token st){
+        workerLoop(st);
+    });
+
+    m_display_is_on = true;
+
+    log.status("Display is ON !");
 
     return true;
 }
@@ -688,15 +711,19 @@ bool Display::createFbFromFd(std::array<int, DRM_MAX_PLANES_PER_FRAME>& buf_fds,
     uint32_t handles[DRM_MAX_PLANES_PER_FRAME]{};
     uint32_t pitches[DRM_MAX_PLANES_PER_FRAME]{};
     uint32_t offsets[DRM_MAX_PLANES_PER_FRAME]{};
-    for(int i = 0; i < DRM_MAX_PLANES_PER_FRAME; i++){
-        if(buf_fds[i] >= 0){
-            ret = drmPrimeFDToHandle(m_drmFd, buf_fds[i], &handles[i]);
-            if(ret < 0){
-                log.error("drmPrimeFDToHandle failed: cannot import DMA_BUF: %s", strerror(errno));
-                goto err;
-            }
-            pitches[i] = m_config.cam_buf.stride[i];
+    int nplanes = m_cam_format_packed ? 1 : m_cam_format_nplanes;
+
+    for(int i = 0; i < nplanes; i++){
+        if(buf_fds[i] <= 0){ // fd 0 is never a dma-buf here
+            log.error("createFbFromFd: missing dma fd for plane %d", i);
+            goto err;
         }
+        ret = drmPrimeFDToHandle(m_drmFd, buf_fds[i], &handles[i]);
+        if(ret < 0){
+            log.error("drmPrimeFDToHandle failed: cannot import DMA_BUF: %s", strerror(errno));
+            goto err;
+        }
+        pitches[i] = m_config.cam_buf.stride[i];
         offsets[i] = 0;
     }
 
@@ -744,24 +771,22 @@ void eventCb(int fd, unsigned int sequence, unsigned int sec, unsigned int usec,
 {
     (void) fd;
     (void) sequence;
-    frame_info_t *f = static_cast<frame_info_t*>(user_data);
+    scanout_status_t *ss = static_cast<scanout_status_t*>(user_data);
     float old_t = 0;
     float curr_t = 0;
-    float refresh_rate = 0;
 
     // Calculate FPS
-    if(f->count > 0){
-        old_t = (float) f->sec + (float) f->usec * 0.000001f;
+    if(ss->count > 0){
+        old_t = (float) ss->sec + (float) ss->usec * 0.000001f;
         curr_t = (float) sec + (float) usec * 0.000001f;
-        refresh_rate = (1.0f / (curr_t - old_t));
-        f->sec = sec;
-        f->usec = usec;
+        ss->refresh_rate = (1.0f / (curr_t - old_t));
+        ss->sec = sec;
+        ss->usec = usec;
     }
 
-    // Flip complete
-    f->flip_pending = false;
-
-    printf("Flip complete for frame %u @%.02fhz\n", f->count++, refresh_rate);
+    // Flip complete (for the previous buffer)
+    ss->complete = true;
+    ss->count++;
 }
 
 bool Display::handleEvent()
@@ -806,11 +831,11 @@ bool Display::atomicUpdate(uint32_t cam_fbId) // TODO: add gpu_fbId
     // DRM_MODE_PAGE_FLIP_EVENT: Generates a VBLANK event when the flip completes
     uint32_t flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
     
-    ret = drmModeAtomicCommit(m_drmFd, req, flags, &m_frame);
+    ret = drmModeAtomicCommit(m_drmFd, req, flags, &m_scanout_status);
     if(ret < 0){
         log.error("drmModeAtomicCommit: Atomic commit failed: %s", strerror(errno));
     } else {
-        m_frame.flip_pending = true;
+        m_scanout_status.complete = false;
     }
 
     drmModeAtomicFree(req);
@@ -857,6 +882,107 @@ bool Display::scanout(std::array<int, DRM_MAX_PLANES_PER_FRAME>& cam_buf_fds)
         }
     }
 
+    log.info("Scanout complete for frame %u @%.02fhz", m_scanout_status.count, m_scanout_status.refresh_rate);
+
+    return true;
+}
+
+void Display::workerLoop(std::stop_token st)
+{
+    Logger& log = m_logger;
+    struct pollfd pfd = { .fd = m_drmFd, .events = POLLIN, .revents = 0};
+
+    while(!st.stop_requested()){
+        int ret = poll(&pfd, 1, 16);  // 16ms timeout for ~60Hz refresh rate
+        if(ret < 0){
+            if(errno == EINTR) continue; // errors except EINTR
+            log.error("workerLoop: poll() failure: %s", strerror(errno));
+            m_healthy.store(false);
+            break;
+        }
+
+        // Handle DRM events (page-flip complete)
+        if(pfd.revents & POLLIN){
+            if(!handleEvent()){
+                log.error("workerLoop: handleEvent() failure");
+                m_healthy.store(false);
+                break;
+            }
+            // Swap after flip complete: the pending frame is on-screen now, so release the old one
+            if(m_scanout_status.complete && m_pending_frame)
+                m_on_screen_frame = std::move(m_pending_frame);
+        }
+
+        // Check if testing
+        if(m_config.testing_display && m_scanout_status.complete){
+            std::array<int, DRM_MAX_PLANES_PER_FRAME> dummy;
+            if(!scanout(dummy)){
+                log.error("workerLoop: scanout() failure");
+                m_healthy.store(false);
+                break;
+            }
+            continue;
+        }
+
+        // Ingest frames from capture frames_queue
+        if(m_next_frame == nullptr)
+            m_config.frames_queue->try_dequeue(m_next_frame);  // FIFO. To check later if need to switch to LIFO
+
+        // Commit if we have a frame and no flip is pending
+        if(m_next_frame && m_scanout_status.complete){
+            uint32_t idx = *m_next_frame;
+            std::array<int, DRM_MAX_PLANES_PER_FRAME> fds;
+            for(int i = 0; i < DRM_MAX_PLANES_PER_FRAME; i++)
+                fds[i] = g_frames_db[idx].dma_fds[i];
+
+            log.info("workerLoop: scanning out buffer idx %d", idx);
+
+            if(scanout(fds)){
+                m_pending_frame = std::move(m_next_frame);
+            } else {
+                log.error("workerLoop: scanout() failure");
+                m_next_frame.reset(); // drop
+                m_healthy.store(false);
+                break;
+            }
+        }
+    }
+}
+
+bool Display::stop()
+{
+    Logger& log = m_logger;
+
+    if(!m_display_is_on)
+        return true;
+
+    // Stop workerLoop
+    m_worker.request_stop();
+    m_worker = {};
+
+    // Turn off display / detach plane
+    if(m_drmFd >= 0 && m_primaryPlaneId > 0 && m_crtcId > 0){
+        drmModeAtomicReq *req = drmModeAtomicAlloc();
+        if(req){
+            uint32_t prop_crtc_active = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "ACTIVE");
+            if(prop_crtc_active)
+                drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_active, 0);
+            if(m_modePropFb_id)
+                drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, 0);
+            drmModeAtomicCommit(m_drmFd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr);
+            drmModeAtomicFree(req);
+        }
+    }
+
+    // Release frame references
+    m_next_frame.reset();
+    m_pending_frame.reset();
+    m_on_screen_frame.reset();
+
+    m_display_is_on = false;
+
+    log.status("Display is OFF !");
+
     return true;
 }
 
@@ -865,19 +991,8 @@ Display::~Display()
     Logger& log = m_logger;
     log.status("Quitting...");
 
-/*     // Turn off display / detach plane to free references and avoid CMA memory leak
-    if(m_initialized && m_drmFd >= 0 && m_primaryPlaneId > 0 && m_crtcId > 0){
-        drmModeAtomicReq *req = drmModeAtomicAlloc();
-        if(req){
-            uint32_t prop_crtc_active = get_drmModePropertyId(m_drmFd, m_crtcId, DRM_MODE_OBJECT_CRTC, "ACTIVE");
-            if(prop_crtc_active) drmModeAtomicAddProperty(req, m_crtcId, prop_crtc_active, 0);
-            
-            if(m_modePropFb_id) drmModeAtomicAddProperty(req, m_primaryPlaneId, m_modePropFb_id, 0);
-            
-            drmModeAtomicCommit(m_drmFd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr);
-            drmModeAtomicFree(req);
-        }
-    } */
+    // Stop
+    stop();
 
     // Free used FBs
     for(const auto& pair : m_fb_map){

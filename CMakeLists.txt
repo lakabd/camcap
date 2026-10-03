@@ -25,7 +25,7 @@ project(camcap
     LANGUAGES CXX
 )
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -34,6 +34,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Dependencies
+find_package(readerwriterqueue REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DRM REQUIRED libdrm)
 pkg_check_modules(GBM REQUIRED gbm)
@@ -49,6 +50,7 @@ set(sources
 
 # Header files
 set(headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/include/config.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/helpers.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/capture.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/include/display.hpp

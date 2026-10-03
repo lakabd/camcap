@@ -23,17 +23,10 @@
 #pragma once
 
 #include <vector>
-#include <linux/videodev2.h>
-#include <array>
+#include <poll.h>
 
 #include "logger.hpp"
 #include "helpers.hpp"
-
-enum class DequeueStatus {
-    Success,
-    NoBufferInQueue,
-    Error
-};
 
 struct capture_buf {
     int plane_fd[VIDEO_MAX_PLANES]; // For DMA_BUF
@@ -62,7 +55,6 @@ class Capture {
 private:
     int m_fd{-1};
     std::vector<capture_buf> m_capture_buf;
-    struct v4l2_buffer m_v4l2_buf{};
     capture_config m_config{};
     __u32 m_memory_type{};
     __u32 m_num_planes{};
@@ -71,6 +63,10 @@ private:
     Logger m_logger;
     bool m_initialized{false};
     bool m_stream_is_on{false};
+
+    std::jthread m_worker;
+    std::atomic<bool> m_healthy{true};
+    moodycamel::BlockingReaderWriterQueue<std::shared_ptr<uint32_t>> m_display_queue{FRAME_QUEUE_SIZE};
 
     // Caps
     bool checkDeviceCapabilities();
@@ -84,38 +80,36 @@ private:
     // Buffers
     bool requestBuffers();
     bool prepareBuffers();
+    bool dequeueBuffer(__u32 *out_buf_index);
+    bool queueBuffer(__u32 in_buf_index);
 
     // Streaming
     bool streamOn();
     bool streamOff();
 
+    // Helpers
+    bool saveOneFrame(__u32 buf_index, const std::string& path);
+
+    // Worker
+    void workerLoop(std::stop_token st);
+
 public:
     Capture(const std::string& device, capture_config& conf, bool verbose);
     ~Capture();
 
-    int get_fd(){
-        return (m_initialized) ? m_fd : 0;
-    }
-
-    const capture_config& get_config(){
+    const capture_config& get_config() const {
         return m_config;
     }
 
-    bool get_buffer_dmafds(__u32 buf_index, std::array<int, DRM_MAX_PLANES_PER_FRAME>& buf_fds){
-        if(!m_initialized)
-            return false;
-        if(buf_index >= m_config.buf_count)
-            return false;
-        for(int i=0; i < DRM_MAX_PLANES_PER_FRAME; i++)
-            buf_fds[i] = m_capture_buf[buf_index].plane_fd[i];
-        return true;
+    auto get_queue(){
+        return &m_display_queue;
     }
 
-    bool queueBuffer(__u32 in_buf_index);
-    DequeueStatus dequeueBuffer(__u32 *out_buf_index);
+    bool is_healthy() const {
+        return m_healthy.load(); 
+    }
 
     bool initialize(); // Initialize Capture
     bool start(); // Start streaming
-    bool saveOneFrame(__u32 buf_index, const std::string& path);
     bool stop(); // Stop streaming
 };

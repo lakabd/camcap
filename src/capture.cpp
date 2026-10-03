@@ -448,7 +448,7 @@ bool Capture::queueBuffer(__u32 buf_index)
     struct v4l2_buffer buf{};
     struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
     
-    log.info("Queuing buffer %d", buf_index);
+    log.info("V4L2 Queuing buffer %d", buf_index);
 
     // Sanity check
     if(buf_index >= m_config.buf_count){
@@ -479,18 +479,18 @@ bool Capture::queueBuffer(__u32 buf_index)
     return true;
 }
 
-DequeueStatus Capture::dequeueBuffer(__u32 *out_buf_index)
+bool Capture::dequeueBuffer(__u32 *out_buf_index)
 {
     Logger& log = m_logger;
     struct v4l2_buffer buf{};
     struct v4l2_plane planes[VIDEO_MAX_PLANES]{};
     
-    log.info("Dequeuing a buffer");
+    log.info("V4L2 Dequeuing a buffer");
 
     // Sanity check
     if(!out_buf_index){
         log.error("dequeueBuffer: out_buf_index is NULL");
-        return DequeueStatus::Error;
+        return false;
     }
 
     // Fill v4l2_buffer struct
@@ -506,13 +506,11 @@ DequeueStatus Capture::dequeueBuffer(__u32 *out_buf_index)
     // Dequeue
     while(ioctl(m_fd, VIDIOC_DQBUF, &buf) == -1){
         switch(errno){
-            case EAGAIN: // Nothing in the queue
-                return DequeueStatus::NoBufferInQueue;
-            case EINTR: // Interrupted by signal, retry
+            case EINTR:  // Interrupted by signal, retry
                 continue;
             default:
                 log.error("VIDIOC_DQBUF failed with error: %s", strerror(errno));
-                return DequeueStatus::Error;
+                return false;
         }
     }
 
@@ -528,7 +526,7 @@ DequeueStatus Capture::dequeueBuffer(__u32 *out_buf_index)
         m_capture_buf[buf.index].plane_bytesused[p] = planes[p].bytesused;
     
     
-    return DequeueStatus::Success;
+    return true;
 }
 
 bool Capture::streamOn()
@@ -618,6 +616,11 @@ bool Capture::start()
 
     m_stream_is_on = true;
 
+    // Start worker
+    m_worker = std::jthread([this](std::stop_token st){
+        workerLoop(st);
+    });
+
     log.status("Stream is ON !");
 
     return true;
@@ -674,6 +677,57 @@ bool Capture::saveOneFrame(__u32 buf_index, const std::string& path)
     return true;
 }
 
+void Capture::workerLoop(std::stop_token st)
+{
+    Logger& log = m_logger;
+    __u32 buf_index = 0;
+    struct pollfd pfd = { .fd = m_fd, .events = POLLIN, .revents = 0};
+
+    while(!st.stop_requested()){
+        // poll fd untill data is ready
+        int ret = poll(&pfd, 1, 5000); // Wait for 5sec (detect if camera stalls)
+
+        if(ret > 0){
+            if(st.stop_requested()) break; // re-check before touching v4l2, as the poll timout is huge
+
+            // Dequeue buffer: buf_idx
+            if(!dequeueBuffer(&buf_index)){
+                log.error("workerLoop: dequeueBuffer() failure ");
+                m_healthy.store(false);
+                break;
+            }
+
+            // Fill g_frames_db[buf_index]
+            frame_t& frame = g_frames_db[buf_index];
+            frame.v4l2_buf_indx = buf_index;
+            for(__u32 i = 0; i < DRM_MAX_PLANES_PER_FRAME; i++)
+                frame.dma_fds[i] = (i < m_num_planes) ? m_capture_buf[buf_index].plane_fd[i] : -1;
+            
+            // Send a shared_ptr of buf_idx.
+            // When refcount reaches 0 we queue back the buffer to V4L2.
+            auto idx = std::shared_ptr<uint32_t>(
+                new uint32_t(buf_index), [this](uint32_t* p){
+                    queueBuffer(*p);
+                    delete p;
+                }
+            );
+
+            // Enqueue the idx
+            m_display_queue.enqueue(std::move(idx));
+            log.info("workerLoop: buffer idx %d ready", buf_index);
+        }
+        else if(ret == 0){
+            log.status("workerLoop: poll timeout!");
+            continue;
+        }
+        else {
+            log.error("workerLoop: poll() failure: %s", strerror(errno));
+            m_healthy.store(false);
+            break;
+        }
+    }
+}
+
 bool Capture::streamOff()
 {
     Logger& log = m_logger;
@@ -704,11 +758,21 @@ bool Capture::stop()
     if (!m_stream_is_on)
         return true;
 
+    // Stop workerLoop
+    m_worker.request_stop();
+
     // Stop streaming
     if(!streamOff()){
         log.error("Capture::streamOff Failed !");
         return false;
     }
+
+    // Join worker after streamOff (releases the thread from 5s poll)
+    m_worker = {};
+
+    // Drain any frames still in the queue
+    std::shared_ptr<uint32_t> leftover;
+    while (m_display_queue.try_dequeue(leftover)) { /* queueBuffer is triggered */ }
 
     log.status("Capture is OFF !");
 
@@ -719,6 +783,9 @@ Capture::~Capture()
 {
     Logger& log = m_logger;
     log.status("Quitting...");
+
+    // Stop
+    stop();
 
     // Unmap requested buffers
     for(unsigned int i = 0; i < m_config.buf_count; i++){

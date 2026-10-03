@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Abderrahim LAKBIR
+ * Copyright (c) 2026 Abderrahim LAKBIR
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,29 +22,28 @@
 
 #pragma once
 
-#include <cstring>
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-#include <string>
-#include <thread>
-#include <memory>
-#include "readerwriterqueue/readerwriterqueue.h"
+#include <atomic>
+#include <array>
+#include <linux/videodev2.h>
 
-#include "config.hpp"
+#define DRM_MAX_PLANES_PER_FRAME  4 // DRM maximum number of Planes/DMA_FDs per frame (MP)
+#define NUM_BUFFERS 8
+#define FRAME_QUEUE_SIZE NUM_BUFFERS
 
-bool validate_buffer_t(const buffer_t& buf, bool validate_stride);
+// Generic buffer type
+typedef struct {
+    std::string fourcc;
+    uint32_t width{0};
+    uint32_t height{0};
+    uint32_t stride[VIDEO_MAX_PLANES]{0}; // Array of strides for MP format support. Value in bytes (pitch)
+} buffer_t;
 
-// V4L2
-bool xioctl(int fd, unsigned long req, void *arg);
-void print_v4l2_device_caps(__u32 caps);
+// Frame type
+typedef struct {
+    std::array<int, DRM_MAX_PLANES_PER_FRAME> dma_fds{-1, -1, -1, -1};
+    uint32_t v4l2_buf_indx{0};
+    uint64_t timestamp{0};
+} frame_t;
 
-// DRM
-void print_drmModeRes(drmModeRes *res);
-void print_drmModeConnector(int drmfd, drmModeConnector *conn);
-void print_drmModeEncoder(drmModeEncoder *enc);
-void print_drmModeCrtc(drmModeCrtc *crtc);
-void print_drmModePlane(drmModePlane *plane);
-uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type, const char *name);
-uint8_t get_drm_fmt_nplanes(uint32_t drm_format);
-bool pfmt_calculate_planes_info(uint32_t drm_format, uint32_t height, uint32_t *pitches, uint32_t *offsets);
-bool fourcc_v4l2_to_drm(std::string& fourcc);
+// This is the global frame db
+inline std::array<frame_t, NUM_BUFFERS> g_frames_db;
