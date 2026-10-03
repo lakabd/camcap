@@ -169,15 +169,9 @@ bool Capture::checkFormatSize()
     
     while(ioctl(m_fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) == 0 || !requested_size_ok){
         found_sizes = true;
-        min_w = frmsize.stepwise.min_width;
-        min_h = frmsize.stepwise.min_height;
-        max_w = frmsize.stepwise.max_width;
-        max_h = frmsize.stepwise.max_height;
-        step_w = frmsize.stepwise.step_width;
-        step_h = frmsize.stepwise.step_height;
 
+        // DISCRETE frame sizes: need enumeration
         if(frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE){
-            // Discrete frame sizes
             log.info("  [%d] Discrete sizes: %dx%d",
                 frmsize.index,
                 frmsize.discrete.width,
@@ -185,8 +179,20 @@ bool Capture::checkFormatSize()
             // Exact match required
             if(w == frmsize.discrete.width && h == frmsize.discrete.height)
                 requested_size_ok = true;
+            
+            frmsize.index++;
+            continue;
         }
-        else if(frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE){
+
+        // STEPWISE / CONTINUOUS: no enumeration needed, index 0 tells the range
+        min_w = frmsize.stepwise.min_width;
+        min_h = frmsize.stepwise.min_height;
+        max_w = frmsize.stepwise.max_width;
+        max_h = frmsize.stepwise.max_height;
+        step_w = frmsize.stepwise.step_width;
+        step_h = frmsize.stepwise.step_height;
+
+        if(frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE){
             // Stepwise frame sizes
             log.info("  [%d] Stepwise (range with step):", frmsize.index);
             log.info("      Width:  %d - %d (step %d)", min_w,  max_w,  step_w);
@@ -208,7 +214,7 @@ bool Capture::checkFormatSize()
                 requested_size_ok = true;
         }
 
-        frmsize.index++;
+        break;
     }
     // If no sizes are found, assume all sizes are supported
     if(!found_sizes){
@@ -218,7 +224,17 @@ bool Capture::checkFormatSize()
 
     // Check if requested size was found
     if(!requested_size_ok){
+        // Suggest nearest valid size on the step grid
+        auto snap = [](__u32 v, __u32 mn, __u32 mx, __u32 st) -> __u32 {
+            __u32 k = (st > 0) ? (v - mn + st/2) / st : 0; // rounded
+            __u32 s = mn + k * st;
+            return (s > mx) ? mx : s;
+        };
+
         log.error("Size %dx%d is NOT supported for format %s", w, h, fourcc.c_str());
+        log.error("Nearest valid size: %ux%u (range %u-%u step %u x %u-%u step %u)",
+                  snap(w, min_w, max_w, step_w), snap(h, min_h, max_h, step_h),
+                  min_w, max_w, step_w, min_h, max_h, step_h);
         return false;
     }
     
