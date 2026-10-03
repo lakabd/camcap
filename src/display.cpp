@@ -45,6 +45,13 @@ Display::Display(display_config& conf, bool verbose)
         if(!m_config.frames_queue){
             log.fatal("User input: No frame queue was specified !");
         }
+
+        // Displaying at 1:1 ratio
+        m_src_w = m_config.cam_buf.width;
+        m_src_h = m_config.cam_buf.height;
+        m_dst_w = m_src_w;
+        m_dst_h = m_src_h;
+        m_dst_x = m_dst_y = 0;
     }
     else {
         // Tests
@@ -330,6 +337,26 @@ bool Display::findPlane()
     if(log.get_verbose()){
         print_drmModePlane(m_drmPrimaryPlane);
     }
+
+    // Setting Plane rect size
+    if(m_config.testing_display){
+        m_src_w = m_modeSettings.hdisplay;
+        m_src_h = m_modeSettings.vdisplay;
+        m_dst_x = m_dst_y = 0;
+        m_dst_w = m_src_w; 
+        m_dst_h = m_src_h; // 1:1
+    } else {
+        // 1:1 requires the source to fit entirely within the display mode
+        if(m_src_w > m_modeSettings.hdisplay || m_src_h > m_modeSettings.vdisplay){
+            log.error("Camera buffer %ux%u does not fit display mode %dx%d", m_src_w, m_src_h, m_modeSettings.hdisplay, m_modeSettings.vdisplay);
+            return false;
+        }
+    }
+
+    log.info("Plane rect dimensions:\n"
+            "\tSource: width = %u, height = %u \n"
+            "\tDisplay: width = %u, height = %u \n"
+            "\tCRTC: x = %u, y = %u, width = %u, height = %u",m_src_w, m_src_h, m_modeSettings.hdisplay, m_modeSettings.vdisplay, m_dst_x, m_dst_y, m_dst_w, m_dst_h);
     
     return true;
 }
@@ -399,8 +426,8 @@ bool Display::atomicModeSet()
         log.error("Failed to find Plane SRC properties");
         goto err;
     }
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_w, ((uint32_t)m_modeSettings.hdisplay) << 16);
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_h, ((uint32_t)m_modeSettings.vdisplay) << 16);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_w, m_src_w << 16);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_h, m_src_h << 16);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_x, 0);
     drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_src_y, 0);
 
@@ -413,10 +440,10 @@ bool Display::atomicModeSet()
         log.error("Failed to find Plane CRTC properties");
         goto err;
     }
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_w, m_modeSettings.hdisplay);
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_h, m_modeSettings.vdisplay);
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_x, 0);
-    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_y, 0);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_w, m_dst_w);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_h, m_dst_h);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_x, m_dst_x);
+    drmModeAtomicAddProperty(req, m_primaryPlaneId, prop_crtc_y, m_dst_y);
 
     // Setup event context & user_data
     m_drm_evctx.version = 2;
@@ -475,7 +502,7 @@ bool Display::initialize()
 
     // Load Splashscreen or test patern
     if(m_config.testing_display){
-        if(!createTestPattern()){
+        if(!createTestPattern(m_src_w, m_src_h)){
             log.error("createTestPattern() failed!");
             return false;
         }
@@ -519,7 +546,7 @@ bool Display::start()
     return true;
 }
 
-bool Display::createTestPattern()
+bool Display::createTestPattern(uint32_t width, uint32_t height)
 {
     Logger& log = m_logger;
     int ret = 0;
@@ -533,8 +560,8 @@ bool Display::createTestPattern()
     log.status("Using test pattern (format : XR24)");
     
     // Create Dumb Buffer
-    creq.width = m_modeSettings.hdisplay;
-    creq.height = m_modeSettings.vdisplay;
+    creq.width = width;
+    creq.height = height;
     creq.bpp = 32; // XRGB8888
     ret = drmIoctl(m_drmFd, DRM_IOCTL_MODE_CREATE_DUMB, &creq);
     if(ret < 0){
@@ -603,7 +630,7 @@ bool Display::loadSplashScreen()
     // TODO
 
     // Fall back to createTestPattern() for now
-    bool ret = createTestPattern();
+    bool ret = createTestPattern(m_src_w, m_src_h);
     m_splashscreen_FbId = m_testPattern_FbId;
     return ret;
 }

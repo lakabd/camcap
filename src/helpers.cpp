@@ -505,3 +505,18 @@ bool fourcc_v4l2_to_drm(std::string& fourcc)
     // Assume other formats are the same for both.
     return true;
 }
+
+// Scal to fit : largest centered rect of src aspect that fits in display wxh
+void fit_rect(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh, uint32_t& x, uint32_t& y, uint32_t& w, uint32_t& h)
+{
+    if((uint64_t)sw * dh > (uint64_t)dw * sh){ // source relatively wider -> fit width
+        w = dw;
+        h = (uint32_t)((uint64_t)sh * dw / sw);
+    } else {
+        h = dh;
+        w = (uint32_t)((uint64_t)sw * dh / sh);
+    }
+    // center
+    x = (dw - w) / 2;
+    y = (dh - h) / 2;
+}

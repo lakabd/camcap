@@ -48,3 +48,6 @@ uint32_t get_drmModePropertyId(int fd, uint32_t object_id, uint32_t object_type,
 uint8_t get_drm_fmt_nplanes(uint32_t drm_format);
 bool pfmt_calculate_planes_info(uint32_t drm_format, uint32_t height, uint32_t *pitches, uint32_t *offsets);
 bool fourcc_v4l2_to_drm(std::string& fourcc);
+
+// MISC
+void fit_rect(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh, uint32_t& x, uint32_t& y, uint32_t& w, uint32_t& h);

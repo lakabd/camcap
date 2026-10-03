@@ -53,9 +53,9 @@ int main(int argc, char* argv[])
 
     // Init capture
     capture_config cam_conf;
-    cam_conf.buf.fourcc = "NM21";
-    cam_conf.buf.width  = 1920;
-    cam_conf.buf.height = 1080;
+    cam_conf.buf.fourcc = "NV12";
+    cam_conf.buf.width  = 1280;
+    cam_conf.buf.height = 720;
     cam_conf.buf_count = 5;
     Capture cap(ISP_MAINPATH, cam_conf, CAPTURE_VERBOSITY);
 

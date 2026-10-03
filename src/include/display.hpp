@@ -72,6 +72,10 @@ private:
     uint32_t m_crtcId{0};
     uint32_t m_primaryPlaneId{0};
 
+    // Display rectangle
+    uint32_t m_src_w{0}, m_src_h{0}; // source rect (FB/camera size)
+    uint32_t m_dst_x{0}, m_dst_y{0}, m_dst_w{0}, m_dst_h{0}; // dest rect on CRTC
+
     struct gbm_device *m_gbmDev{nullptr};
     uint32_t m_gbm_flags{0};
     uint32_t m_gpu_format{0};
@@ -105,7 +109,7 @@ private:
     bool findEncoder();
     bool findCrtc();
     bool findPlane();
-    bool createTestPattern();
+    bool createTestPattern(uint32_t width, uint32_t height);
     bool loadSplashScreen();
     bool atomicModeSet();
     bool atomicUpdate(uint32_t fbId);
