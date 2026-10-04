@@ -35,6 +35,7 @@ endif()
 
 # Dependencies
 find_package(readerwriterqueue REQUIRED)
+find_package(CLI11 REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(DRM REQUIRED libdrm)
 pkg_check_modules(GBM REQUIRED gbm)
